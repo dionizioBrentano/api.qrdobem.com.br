@@ -105,4 +105,30 @@ class AdminController extends Controller
             'batch' => $batch,
         ]);
     }
+
+    public function updatePricing(Request $request)
+    {
+        if (!$this->authorizeSuperAdmin($request)) {
+            return response()->json(['error' => 'Acesso negado. Apenas super administradores.'], 403);
+        }
+
+        $request->validate([
+            'unit_price' => 'required|numeric|min:0.01',
+            'min_quantity' => 'required|integer|min:1',
+            'max_quantity' => 'required|integer|min:1|gte:min_quantity',
+        ]);
+
+        $pricing = \App\Models\CreditPricing::first();
+
+        if ($pricing) {
+            $pricing->update($request->only(['unit_price', 'min_quantity', 'max_quantity']));
+        } else {
+            $pricing = \App\Models\CreditPricing::create($request->only(['unit_price', 'min_quantity', 'max_quantity']));
+        }
+
+        return response()->json([
+            'message' => 'Configurações de preço atualizadas com sucesso.',
+            'pricing' => $pricing,
+        ]);
+    }
 }

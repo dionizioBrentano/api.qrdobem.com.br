@@ -6,6 +6,7 @@ use App\Http\Controllers\AdminController;
 use App\Http\Controllers\MessageController;
 use App\Http\Controllers\OtpController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\CreditController;
 
 // CORS é tratado exclusivamente pelo middleware HandleCors do Laravel (config/cors.php)
 // NÃO adicionar headers manuais aqui — isso causa duplicação e bloqueio no browser.
@@ -39,6 +40,11 @@ Route::middleware('auth.firebase')->group(function () {
     // Inbox (Fase 6)
     Route::get('/messages', [MessageController::class, 'index']);
     Route::post('/messages/{id}/read', [MessageController::class, 'markAsRead']);
+
+    // Credits / Checkout (Sprint 10)
+    Route::get('/credits/pricing', [CreditController::class, 'pricing']);
+    Route::post('/credits/checkout', [CreditController::class, 'checkout']);
+    Route::put('/admin/credits/pricing', [AdminController::class, 'updatePricing']);
 });
 
 // --- Rotas públicas de entidades ---
