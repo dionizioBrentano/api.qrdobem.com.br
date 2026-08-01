@@ -61,4 +61,21 @@ class MercadoPagoService
 
         return null;
     }
+
+    /**
+     * Busca os detalhes de um pagamento no Mercado Pago.
+     */
+    public function getPayment(string $id): ?array
+    {
+        $token = $this->getAccessToken();
+
+        $response = Http::withToken($token)
+            ->get("https://api.mercadopago.com/v1/payments/{$id}");
+
+        if ($response->successful()) {
+            return $response->json();
+        }
+
+        return null;
+    }
 }

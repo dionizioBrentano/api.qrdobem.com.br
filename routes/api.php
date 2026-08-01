@@ -7,6 +7,7 @@ use App\Http\Controllers\MessageController;
 use App\Http\Controllers\OtpController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\CreditController;
+use App\Http\Controllers\WebhookController;
 
 // CORS é tratado exclusivamente pelo middleware HandleCors do Laravel (config/cors.php)
 // NÃO adicionar headers manuais aqui — isso causa duplicação e bloqueio no browser.
@@ -16,6 +17,10 @@ Route::middleware('throttle:otp')->group(function () {
     Route::post('/auth/send-otp', [OtpController::class, 'sendOtp']);
     Route::post('/auth/verify-otp', [OtpController::class, 'verifyOtp']);
 });
+
+// Webhooks
+Route::post('/webhooks/mercadopago', [WebhookController::class, 'mercadopago']);
+
 
 // --- Rotas protegidas (Firebase Auth) ---
 Route::middleware('auth.firebase')->group(function () {
