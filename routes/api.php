@@ -19,8 +19,12 @@ Route::middleware('throttle:otp')->group(function () {
 });
 
 // Webhooks
+// Nota sobre CSRF: No Laravel 11, rotas definidas em routes/api.php utilizam
+// apenas o middleware group 'api', que por padrão NÃO inclui o VerifyCsrfToken.
+Route::get('/webhooks/mercadopago', function () {
+    return response()->json(['ok' => true, 'service' => 'mercadopago-webhook']);
+});
 Route::post('/webhooks/mercadopago', [WebhookController::class, 'mercadopago']);
-
 
 // --- Rotas protegidas (Firebase Auth) ---
 Route::middleware('auth.firebase')->group(function () {
