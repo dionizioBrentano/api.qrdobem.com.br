@@ -124,6 +124,9 @@ class ProfileController extends Controller
 
         if ($hasCpf && $hasPhone && $hasEmailVerified) {
             $tenant->update(['profile_status' => 'active']);
+            
+            // Concede créditos de onboarding ao atingir o status active
+            app(\App\Services\OnboardingCreditService::class)->grantOnboardingBatch($tenant);
         }
     }
 

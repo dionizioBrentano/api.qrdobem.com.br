@@ -18,6 +18,7 @@ class CreditBatch extends Model
         'unit_price',
         'expires_at',
         'status',
+        'source',
     ];
 
     protected $casts = [

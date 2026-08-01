@@ -81,6 +81,9 @@ class OtpController extends Controller
             $hasPhone = !empty($tenant->phone);
             if ($hasCpf && $hasPhone) {
                 $tenant->update(['profile_status' => 'active']);
+                
+                // Concede créditos de onboarding ao atingir o status active
+                app(\App\Services\OnboardingCreditService::class)->grantOnboardingBatch($tenant);
             }
         }
 

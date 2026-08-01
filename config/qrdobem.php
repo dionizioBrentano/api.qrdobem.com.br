@@ -39,4 +39,16 @@ return [
 
     'error_correction' => env('QR_ERROR_CORRECTION', 'Q'),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Créditos de Onboarding
+    |--------------------------------------------------------------------------
+    |
+    | Quantidade de créditos concedida automaticamente quando o usuário
+    | conclui o Gate 1 de cadastro (profile_status vira 'active').
+    |
+    */
+
+    'onboarding_credits' => (int) env('QR_ONBOARDING_CREDITS', 3),
+
 ];
