@@ -8,6 +8,7 @@ use App\Services\MercadoPagoService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use App\Http\Controllers\CreditController;
 
 class WebhookController extends Controller
 {
@@ -91,7 +92,7 @@ class WebhookController extends Controller
         }
 
         // Idempotency check
-        if ($order->status === 'approved' || !empty($order->mp_payment_id)) {
+        if ($order->status === 'approved') {
             return response()->json(['status' => 'Already processed'], 200);
         }
 
@@ -104,22 +105,7 @@ class WebhookController extends Controller
             // We can still continue or reject, but instructions said optional check, we'll log it.
         }
 
-        DB::transaction(function () use ($order, $dataId) {
-            $order->update([
-                'status' => 'approved',
-                'mp_payment_id' => $dataId,
-            ]);
-
-            CreditBatch::create([
-                'organization_id' => $order->organization_id,
-                'creator_tenant_id' => $order->tenant_id,
-                'amount_total' => $order->quantity,
-                'amount_available' => $order->quantity,
-                'status' => 'active',
-                'source' => 'mercadopago',
-                'expires_at' => null,
-            ]);
-        });
+        CreditController::approveOrder($order, (string)$dataId);
 
         return response()->json(['status' => 'ok'], 200);
     }

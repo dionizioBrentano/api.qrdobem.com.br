@@ -51,7 +51,7 @@ class OnboardingCreditService
                     'amount_total' => $amount,
                     'amount_available' => $amount,
                     'status' => 'active',
-                    'expires_at' => null,
+                    'expires_at' => now()->addDays((int) config('qrdobem.onboarding_credits_days', 30)),
                     'source' => 'onboarding',
                 ]);
             });

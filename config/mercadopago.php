@@ -4,6 +4,8 @@ return [
     'mode' => env('MERCADOPAGO_MODE', 'test'),
     'access_token_test' => env('MERCADOPAGO_ACCESS_TOKEN_TEST', ''),
     'access_token_prod' => env('MERCADOPAGO_ACCESS_TOKEN_PROD', ''),
+    'public_key_test' => env('MERCADOPAGO_PUBLIC_KEY_TEST', ''),
+    'public_key_prod' => env('MERCADOPAGO_PUBLIC_KEY_PROD', ''),
     'webhook_secret' => env('MERCADOPAGO_WEBHOOK_SECRET', ''),
     'frontend_url' => env('FRONTEND_URL', 'https://qrdobem.com.br'),
 

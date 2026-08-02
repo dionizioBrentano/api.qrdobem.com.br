@@ -51,4 +51,6 @@ return [
 
     'onboarding_credits' => (int) env('QR_ONBOARDING_CREDITS', 3),
 
+    'onboarding_credits_days' => (int) env('QR_ONBOARDING_DAYS', 30),
+
 ];

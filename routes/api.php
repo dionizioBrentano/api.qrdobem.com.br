@@ -16,6 +16,9 @@ use App\Http\Controllers\WebhookController;
 Route::middleware('throttle:otp')->group(function () {
     Route::post('/auth/send-otp', [OtpController::class, 'sendOtp']);
     Route::post('/auth/verify-otp', [OtpController::class, 'verifyOtp']);
+    
+    Route::post('/auth/register-link', [\App\Http\Controllers\RegisterController::class, 'sendLink']);
+    Route::get('/auth/register-validate', [\App\Http\Controllers\RegisterController::class, 'validateToken']);
 });
 
 // Webhooks
@@ -29,6 +32,7 @@ Route::post('/webhooks/mercadopago', [WebhookController::class, 'mercadopago']);
 // --- Rotas protegidas (Firebase Auth) ---
 Route::middleware('auth.firebase')->group(function () {
     Route::get('/auth/me', [OtpController::class, 'me']);
+    Route::post('/auth/register-complete', [\App\Http\Controllers\RegisterController::class, 'complete'])->middleware('throttle:otp');
 
     // Perfil (progressivo, sem fricção)
     Route::get('/profile', [ProfileController::class, 'show']);
@@ -50,9 +54,12 @@ Route::middleware('auth.firebase')->group(function () {
     Route::get('/messages', [MessageController::class, 'index']);
     Route::post('/messages/{id}/read', [MessageController::class, 'markAsRead']);
 
-    // Credits / Checkout (Sprint 10)
+    // Credits / Checkout (Sprint 10 & S15 & S17)
+    Route::get('/credits/mp-public-config', [CreditController::class, 'publicConfig']);
     Route::get('/credits/pricing', [CreditController::class, 'pricing']);
     Route::post('/credits/checkout', [CreditController::class, 'checkout']);
+    Route::post('/credits/checkout/card', [CreditController::class, 'checkoutCard']);
+    Route::get('/credits/orders/{id}', [CreditController::class, 'showOrder']);
     Route::put('/admin/credits/pricing', [AdminController::class, 'updatePricing']);
 });
 

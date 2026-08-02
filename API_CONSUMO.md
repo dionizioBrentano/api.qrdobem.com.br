@@ -64,8 +64,11 @@ A autenticação é feita delegando a verificação de credenciais ao Firebase n
 | POST | `/api/messages/{id}/read` | Sim | N/A | 200: `{"success": true}` | 401, 404 | Marca mensagem como lida. |
 | GET | `/api/entities/{code}` | Não | N/A | 200: Dados públicos da entidade | 404 (Inativo/Inexistente) | Oculta dados sensíveis (Fix 10). |
 | POST | `/api/entities/{code}/messages`| Não | `sender_name`, `message`, etc. | 201: `{"message": "..."}` | 404, 422 | Quem leu o QR Code manda mensagem. |
+| GET | `/api/credits/mp-public-config` | Sim | N/A | 200: `{"public_key": "...", "mode": "..."}` | 401 | Retorna a chave pública para inicializar o Payment Brick. |
 | GET | `/api/credits/pricing` | Sim | N/A | 200: Preços configurados | 401 | Retorna preço e limites (min/max). |
-| POST | `/api/credits/checkout` | Sim | `quantity` | 201: `init_point`, `order_id` | 403, 422 | Só `profile_status=active`. Não libera crédito (gera CreditOrder). |
+| POST | `/api/credits/checkout` | Sim | `quantity` | 201: `pix.qr_code`, `order_id` | 403, 422 | Só `profile_status=active`. Gera pedido PIX (Checkout API). |
+| POST | `/api/credits/checkout/card`| Sim | `quantity`, `token`, `payment_method_id` | 201: `order_id`, `status` | 403, 422, 502 | Gera pagamento via Cartão. Aprova imediato se status approved. |
+| GET | `/api/credits/orders/{id}` | Sim | N/A | 200: `status`, `mp_payment_id`, etc. | 404 | Verifica status do pedido de crédito (polling). |
 | PUT | `/api/admin/credits/pricing` | Sim | `unit_price`, `min_quantity`, `max_quantity` | 200: Atualizado | 403 | Apenas superadmin. |
 | POST | `/webhooks/mercadopago` | Não | Payload Mercado Pago | 200: ok | 401 | Valida `x-signature` e libera `CreditBatch`. |
 
@@ -126,7 +129,7 @@ O Frontend deve consultar os dados: `GET /api/entities/{unique_code}`.
 - **Quem é admin:** Tenants com `role: 'superadmin'`. O código não oferece rota de auto-promoção; precisa ser setado via DB diretamente.
 - **Crédito de Onboarding:** Quando o Tenant atinge o `profile_status: 'active'` (ao concluir o Gate 1), a API concede automaticamente um lote inicial de créditos (default: 3) para a sua organização Matriz. A quantidade é configurada no backend (`config/qrdobem.php` / `.env` `QR_ONBOARDING_CREDITS`). Essa ação é **idempotente**; a API identifica lotes com `source: 'onboarding'` e garante que o bônus seja dado apenas uma vez.
 - **Créditos Adicionais (Batches):** Toda entidade criada subtrai 1 de cota de um `CreditBatch` ativo da Organização. Cotas podem ser inseridas manualmente via admin (`POST /api/admin/batches`) ou adquiridas pelo usuário final via checkout. Os sources do `CreditBatch` podem ser `onboarding` ou `mercadopago`.
-- **Compra de Créditos:** O frontend consulta o preço base (`GET /api/credits/pricing`) e envia **apenas** a quantidade (`POST /api/credits/checkout`). O frontend **nunca envia preço**, pois o total é calculado no backend. A resposta traz um `init_point` do Mercado Pago para o usuário pagar. O crédito só é liberado (CreditBatch criado) no recebimento do Webhook validado (`POST /webhooks/mercadopago`). Variáveis exigidas no backend: `MERCADOPAGO_*`, `FRONTEND_URL`, `CREDITS_*`.
+- **Compra de Créditos (Checkout Transparente):** O frontend consulta o preço base (`GET /api/credits/pricing`) e envia **apenas** a quantidade para gerar o pedido PIX (`POST /api/credits/checkout`) ou processar cartão (`POST /api/credits/checkout/card`). O frontend **nunca envia preço**, pois o total é calculado no backend. A resposta do PIX traz o `qr_code` copia-e-cola e o base64 da imagem. O frontend não usa mais redirecionamento externo. O crédito (CreditBatch) é liberado no recebimento do Webhook validado (`POST /webhooks/mercadopago`) para PIX ou de forma síncrona na aprovação do Cartão. O webhook e a rota síncrona compartilham a mesma regra de aprovação. Variáveis exigidas no backend: `MERCADOPAGO_PUBLIC_KEY_*`, `MERCADOPAGO_ACCESS_TOKEN_*`, `MERCADOPAGO_WEBHOOK_SECRET`, `FRONTEND_URL`, `CREDITS_*`.
 
 ## 10. CORS, Ambientes e Configuração do Cliente
 
@@ -155,7 +158,7 @@ Se uma IA for instruída a construir um cliente visual (Frontend/PWA) do zero us
 2. **Configuração Firebase:** Por favor, forneça as variáveis do SDK cliente do Firebase (apiKey, projectId, etc.) para configurar a autenticação.
 3. **Escopo das Trilhas:** O seu frontend vai oferecer a gestão completa dos 3 tipos (`person`, `pet`, `object`), ou será especializado em apenas um?
 4. **Resolução Externa de URL:** Qual domínio as pessoas verão ao ler o QR Code (para certificar que a env da API `QR_PUBLIC_BASE_URL` confere com seu roteamento web frontend)?
-5. **Painel de Créditos:** Como a API agora integra o checkout via Mercado Pago, como a interface exibirá a opção de recarga (consumindo os endpoints de `checkout`) quando houver "Falta de Créditos" (Erro 402)?
+5. **Painel de Créditos:** A API possui checkout embarcado para PIX (`/checkout`) e Cartão (`/checkout/card` via Payment Brick). Como a interface exibirá a opção de recarga quando houver "Falta de Créditos" (Erro 402)?
 6. **Layout Superadmin:** O novo frontend precisará de telas para acessar as rotas `/api/admin/*`?
 
 ### Ordem de Implementação Sugerida (Frontend)
