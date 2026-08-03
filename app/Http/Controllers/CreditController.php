@@ -228,6 +228,7 @@ class CreditController extends Controller
                 'error' => 'Falha ao processar pagamento com Cartão.',
                 // DEBUG TEMPORÁRIO — remover depois de identificar a causa.
                 'mp_debug' => $payment['_body'] ?? null,
+                'env_debug' => $mpService->getEnvironmentInfo(),
             ], 502);
         }
 

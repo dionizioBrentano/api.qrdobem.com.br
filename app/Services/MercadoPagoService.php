@@ -26,9 +26,31 @@ class MercadoPagoService
     public function getPublicKey(): string
     {
         $mode = config('mercadopago.mode');
-        return $mode === 'prod' 
-            ? config('mercadopago.public_key_prod') 
+        return $mode === 'prod'
+            ? config('mercadopago.public_key_prod')
             : config('mercadopago.public_key_test');
+    }
+
+    /**
+     * DEBUG TEMPORÁRIO — expõe apenas o PREFIXO das credenciais em uso,
+     * para confirmar se Public Key e Access Token são do mesmo ambiente.
+     * Nunca expõe a credencial completa. Remover quando o checkout estabilizar.
+     */
+    public function getEnvironmentInfo(): array
+    {
+        $accessToken = $this->getAccessToken();
+        $publicKey = $this->getPublicKey();
+
+        $prefix = fn (?string $v) => $v
+            ? substr($v, 0, strpos($v, '-') !== false ? strpos($v, '-') : 6)
+            : 'VAZIO';
+
+        return [
+            'mode' => config('mercadopago.mode'),
+            'access_token_prefix' => $prefix($accessToken),
+            'public_key_prefix' => $prefix($publicKey),
+            'match' => $prefix($accessToken) === $prefix($publicKey),
+        ];
     }
 
     /**
