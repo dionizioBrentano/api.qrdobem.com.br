@@ -111,6 +111,55 @@ class MercadoPagoService
     }
 
     /**
+     * Cria um pagamento com Cartão via Checkout API (Payment Brick).
+     * Não logamos o token.
+     */
+    public function createCardPayment(
+        CreditOrder $order,
+        string $payerEmail,
+        string $token,
+        string $paymentMethodId,
+        int $installments = 1,
+        ?string $issuerId = null
+    ): ?array {
+        $accessToken = $this->getAccessToken();
+
+        $payload = [
+            'transaction_amount' => (float) $order->price_amount,
+            'description' => 'Créditos QR do Bem',
+            'payment_method_id' => $paymentMethodId,
+            'token' => $token,
+            'installments' => $installments,
+            'payer' => [
+                'email' => $payerEmail,
+            ],
+            'external_reference' => $order->external_reference,
+            'metadata' => [
+                'tenant_id' => $order->tenant_id,
+                'organization_id' => $order->organization_id,
+                'quantity' => $order->quantity,
+                'order_id' => $order->id,
+            ],
+        ];
+
+        if ($issuerId) {
+            $payload['issuer_id'] = $issuerId;
+        }
+
+        $response = Http::withToken($accessToken)
+            ->withHeaders([
+                'X-Idempotency-Key' => $order->external_reference,
+            ])
+            ->post('https://api.mercadopago.com/v1/payments', $payload);
+
+        if ($response->successful()) {
+            return $response->json();
+        }
+
+        return null;
+    }
+
+    /**
      * Busca os detalhes de um pagamento no Mercado Pago.
      */
     public function getPayment(string $id): ?array
