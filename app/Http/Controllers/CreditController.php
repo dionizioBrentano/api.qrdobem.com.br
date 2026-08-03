@@ -170,11 +170,25 @@ class CreditController extends Controller
             'token' => 'required|string',
             'payment_method_id' => 'required|string',
             'payer_email' => 'nullable|email',
+            'identification_type' => 'nullable|string',
+            'identification_number' => 'nullable|string',
         ]);
 
         $payerEmail = $request->payer_email ?? $tenant->email;
         if (!$payerEmail) {
             return response()->json(['error' => 'Email do pagador é obrigatório.'], 422);
+        }
+
+        // O Brick já coleta o CPF do pagador (obrigatório no Brasil). Se por algum
+        // motivo não vier, cai pro CPF já cadastrado no perfil do tenant.
+        $identificationType = $request->identification_type ?? 'CPF';
+        $identificationNumber = $request->identification_number ?? $tenant->cpf;
+
+        if (!$identificationNumber) {
+            return response()->json([
+                'error' => 'CPF do pagador é obrigatório para pagamento com cartão.',
+                'code' => 'IDENTIFICATION_REQUIRED',
+            ], 422);
         }
 
         $pricing = CreditPricing::first();
@@ -203,7 +217,9 @@ class CreditController extends Controller
             $request->token,
             $request->payment_method_id,
             $request->installments ?? 1,
-            $request->issuer_id
+            $request->issuer_id,
+            $identificationType,
+            $identificationNumber
         );
 
         if (!$payment || !isset($payment['id'])) {

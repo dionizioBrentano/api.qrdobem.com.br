@@ -61,25 +61,46 @@ class WebhookController extends Controller
             return response()->json(['error' => 'Invalid signature'], 401);
         }
 
-        // Validated! Let's get the payment details.
-        $payment = $mpService->getPayment((string)$dataId);
+        // Assinatura validada. Conforme a documentação oficial do Mercado Pago,
+        // eles esperam no máximo 22s pela confirmação de recebimento (200/201) —
+        // e recomendam explicitamente buscar os detalhes do pagamento DEPOIS de
+        // responder, não antes. Por isso respondemos já, e só então chamamos a
+        // API deles de volta para buscar o pagamento e processar o pedido.
+        $response = response()->json(['status' => 'received'], 200);
+        $response->send();
+        if (function_exists('fastcgi_finish_request')) {
+            fastcgi_finish_request();
+        }
+
+        $this->processPayment((string) $dataId, $mpService);
+
+        return $response;
+    }
+
+    /**
+     * Busca o pagamento e processa o pedido. Roda DEPOIS que a resposta 200
+     * já foi enviada ao Mercado Pago (ver comentário acima em mercadopago()).
+     */
+    private function processPayment(string $dataId, MercadoPagoService $mpService): void
+    {
+        $payment = $mpService->getPayment($dataId);
 
         if (!$payment) {
             Log::warning("MercadoPago Webhook: Payment {$dataId} not found.");
-            return response()->json(['status' => 'Payment not found'], 200);
+            return;
         }
 
         $externalReference = $payment['external_reference'] ?? null;
         if (!$externalReference) {
             Log::warning("MercadoPago Webhook: Payment {$dataId} has no external_reference.");
-            return response()->json(['status' => 'Ignored, missing external_reference'], 200);
+            return;
         }
 
         $order = CreditOrder::where('external_reference', $externalReference)->first();
 
         if (!$order) {
             Log::warning("MercadoPago Webhook: Order not found for external_reference {$externalReference}.");
-            return response()->json(['status' => 'Order not found'], 200);
+            return;
         }
 
         // Check if not approved
@@ -88,12 +109,12 @@ class WebhookController extends Controller
             if (in_array($status, ['rejected', 'cancelled'])) {
                 $order->update(['status' => $status]);
             }
-            return response()->json(['status' => 'Payment not approved'], 200);
+            return;
         }
 
         // Idempotency check
         if ($order->status === 'approved') {
-            return response()->json(['status' => 'Already processed'], 200);
+            return;
         }
 
         // Optional amount check (allow 0.05 variation)
@@ -102,11 +123,8 @@ class WebhookController extends Controller
 
         if (abs($paymentAmount - $orderAmount) > 0.05) {
             Log::warning("MercadoPago Webhook: Payment {$dataId} amount mismatch. Expected: {$orderAmount}, Got: {$paymentAmount}");
-            // We can still continue or reject, but instructions said optional check, we'll log it.
         }
 
-        CreditController::approveOrder($order, (string)$dataId);
-
-        return response()->json(['status' => 'ok'], 200);
+        CreditController::approveOrder($order, $dataId);
     }
 }

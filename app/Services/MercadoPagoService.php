@@ -142,9 +142,22 @@ class MercadoPagoService
         string $token,
         string $paymentMethodId,
         int $installments = 1,
-        ?string $issuerId = null
+        ?string $issuerId = null,
+        ?string $identificationType = null,
+        ?string $identificationNumber = null
     ): ?array {
         $accessToken = $this->getAccessToken();
+
+        $payer = [
+            'email' => $payerEmail,
+        ];
+
+        if ($identificationNumber) {
+            $payer['identification'] = [
+                'type' => $identificationType ?? 'CPF',
+                'number' => preg_replace('/\D/', '', $identificationNumber),
+            ];
+        }
 
         $payload = [
             'transaction_amount' => (float) $order->price_amount,
@@ -152,9 +165,7 @@ class MercadoPagoService
             'payment_method_id' => $paymentMethodId,
             'token' => $token,
             'installments' => $installments,
-            'payer' => [
-                'email' => $payerEmail,
-            ],
+            'payer' => $payer,
             'external_reference' => $order->external_reference,
             'metadata' => [
                 'tenant_id' => $order->tenant_id,
