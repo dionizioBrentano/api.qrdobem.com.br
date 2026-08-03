@@ -214,7 +214,12 @@ class MercadoPagoService
                 'external_reference' => $order->external_reference,
                 'message' => $e->getMessage(),
             ]);
-            return ['_error' => true, '_status' => 0, '_body' => ['connection_error' => $e->getMessage()]];
+            return [
+                '_error' => true,
+                '_status' => 0,
+                '_body' => ['connection_error' => $e->getMessage()],
+                '_sent_payload' => $payload,
+            ];
         }
 
         if ($response->successful()) {
@@ -225,10 +230,17 @@ class MercadoPagoService
             'external_reference' => $order->external_reference,
             'http_status' => $response->status(),
             'body' => $response->json(),
+            'sent_payload' => $payload,
         ]);
 
-        // Retorna o corpo do erro (sem o token) para o controller decidir o que expor.
-        return ['_error' => true, '_status' => $response->status(), '_body' => $response->json()];
+        // DEBUG TEMPORÁRIO: devolve também o payload EXATO enviado ao Mercado
+        // Pago, para comparar com a documentação sem depender de teste manual.
+        return [
+            '_error' => true,
+            '_status' => $response->status(),
+            '_body' => $response->json(),
+            '_sent_payload' => $payload,
+        ];
     }
 
     /**

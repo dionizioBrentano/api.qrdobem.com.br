@@ -229,6 +229,8 @@ class CreditController extends Controller
                 // DEBUG TEMPORÁRIO — remover depois de identificar a causa.
                 'mp_debug' => $payment['_body'] ?? null,
                 'env_debug' => $mpService->getEnvironmentInfo(),
+                'sent_payload' => $payment['_sent_payload'] ?? null,
+                'received_from_frontend' => $request->except(['token']),
             ], 502);
         }
 
