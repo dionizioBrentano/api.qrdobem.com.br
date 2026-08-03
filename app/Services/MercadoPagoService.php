@@ -45,12 +45,39 @@ class MercadoPagoService
             ? substr($v, 0, strpos($v, '-') !== false ? strpos($v, '-') : 6)
             : 'VAZIO';
 
-        return [
+        $info = [
             'mode' => config('mercadopago.mode'),
             'access_token_prefix' => $prefix($accessToken),
             'public_key_prefix' => $prefix($publicKey),
-            'match' => $prefix($accessToken) === $prefix($publicKey),
+            'prefix_match' => $prefix($accessToken) === $prefix($publicKey),
+            // Trecho do meio da public key, para você conferir no painel se é
+            // a mesma aplicação de onde saiu o Access Token.
+            'public_key_tail' => $publicKey ? substr($publicKey, -6) : null,
         ];
+
+        // Descobre a QUAL CONTA o Access Token pertence. Se não for a mesma
+        // conta/aplicação que gerou a Public Key, o token do cartão criado no
+        // navegador não existe para esta conta -> "Cannot infer Payment Method".
+        try {
+            $me = Http::withToken($accessToken)
+                ->timeout(8)
+                ->get('https://api.mercadopago.com/users/me');
+
+            if ($me->successful()) {
+                $info['access_token_account'] = [
+                    'user_id' => $me->json('id'),
+                    'nickname' => $me->json('nickname'),
+                    'site_id' => $me->json('site_id'),
+                    'email' => $me->json('email'),
+                ];
+            } else {
+                $info['access_token_account'] = ['erro' => $me->status()];
+            }
+        } catch (\Throwable $e) {
+            $info['access_token_account'] = ['erro' => $e->getMessage()];
+        }
+
+        return $info;
     }
 
     /**
@@ -209,6 +236,68 @@ class MercadoPagoService
                     'X-Idempotency-Key' => $order->external_reference,
                 ])
                 ->post('https://api.mercadopago.com/v1/payments', $payload);
+
+            // O erro 2131 ("Cannot infer Payment Method") pode ser causado por um
+            // issuer_id incompatível com a combinação cartão/bandeira. O token já
+            // identifica o cartão, então tentamos de novo sem ele antes de desistir.
+            $isInferenceError = $response->status() === 400
+                && collect($response->json('cause') ?? [])->contains(fn ($c) => ($c['code'] ?? null) == 2131);
+
+            $attempts = ['completo' => $response->status()];
+
+            if ($isInferenceError && isset($payload['issuer_id'])) {
+                Log::warning('MercadoPago: erro 2131 com issuer_id. Repetindo sem issuer_id.', [
+                    'external_reference' => $order->external_reference,
+                ]);
+
+                unset($payload['issuer_id']);
+
+                $response = Http::withToken($accessToken)
+                    ->timeout(10)
+                    ->connectTimeout(5)
+                    ->withHeaders([
+                        // Idempotency key precisa ser diferente na nova tentativa.
+                        'X-Idempotency-Key' => $order->external_reference . '-r2',
+                    ])
+                    ->post('https://api.mercadopago.com/v1/payments', $payload);
+
+                $attempts['sem_issuer_id'] = $response->status();
+
+                $isInferenceError = $response->status() === 400
+                    && collect($response->json('cause') ?? [])->contains(fn ($c) => ($c['code'] ?? null) == 2131);
+            }
+
+            // DIAGNÓSTICO: payload mínimo, só com o que a doc marca como
+            // obrigatório. Se ISTO passar, o problema está em algum campo extra
+            // que enviamos. Se falhar igual, o problema é o token/cartão/conta —
+            // e o formato do nosso request está descartado como causa.
+            if ($isInferenceError) {
+                $minimal = [
+                    'transaction_amount' => (float) $order->price_amount,
+                    'token' => $token,
+                    'description' => 'Créditos QR do Bem',
+                    'installments' => $installments,
+                    'payment_method_id' => $paymentMethodId,
+                    'payer' => ['email' => $payerEmail],
+                ];
+
+                Log::warning('MercadoPago: erro 2131 persistiu. Tentando payload mínimo.', [
+                    'external_reference' => $order->external_reference,
+                ]);
+
+                $response = Http::withToken($accessToken)
+                    ->timeout(10)
+                    ->connectTimeout(5)
+                    ->withHeaders([
+                        'X-Idempotency-Key' => $order->external_reference . '-r3',
+                    ])
+                    ->post('https://api.mercadopago.com/v1/payments', $minimal);
+
+                $attempts['minimo'] = $response->status();
+                $payload = $minimal;
+            }
+
+            $payload['_tentativas'] = $attempts;
         } catch (ConnectionException $e) {
             Log::error('MercadoPago createCardPayment: timeout/conexão', [
                 'external_reference' => $order->external_reference,
