@@ -96,7 +96,12 @@ class CreditController extends Controller
             'external_reference' => (string) Str::uuid(),
         ]);
 
-        $payment = $mpService->createPixPayment($order, $tenant->email);
+        $payment = $mpService->createPixPayment(
+            $order,
+            $tenant->email,
+            $tenant->name,
+            $tenant->cpf
+        );
 
         if (!$payment || !isset($payment['id'])) {
             Log::error('Falha ao criar pagamento PIX no Mercado Pago', ['external_reference' => $order->external_reference]);
@@ -226,11 +231,6 @@ class CreditController extends Controller
             Log::error('Falha ao criar pagamento Cartão no Mercado Pago', ['external_reference' => $order->external_reference]);
             return response()->json([
                 'error' => 'Falha ao processar pagamento com Cartão.',
-                // DEBUG TEMPORÁRIO — remover depois de identificar a causa.
-                'mp_debug' => $payment['_body'] ?? null,
-                'env_debug' => $mpService->getEnvironmentInfo(),
-                'sent_payload' => $payment['_sent_payload'] ?? null,
-                'received_from_frontend' => $request->except(['token']),
             ], 502);
         }
 

@@ -16,8 +16,13 @@ deployment:
     # Limpa caches para o Laravel enxergar rotas e config novas
     - cd $DEPLOYPATH && /usr/local/bin/php artisan config:clear
     - cd $DEPLOYPATH && /usr/local/bin/php artisan route:clear
-    - cd $DEPLOYPATH && /usr/local/bin/php artisan config:cache
     - cd $DEPLOYPATH && /usr/local/bin/php artisan route:cache
+    # NÃO rodar "config:cache".
+    # Ele congela os valores do .env em bootstrap/cache/config.php, e a partir
+    # daí o .env passa a ser ignorado até o próximo deploy. Isso já causou o
+    # sistema continuar usando credenciais de teste do Mercado Pago mesmo com
+    # MERCADOPAGO_MODE=prod escrito no .env. Sem esse cache, toda alteração no
+    # .env vale na hora. O custo é alguns milissegundos por request.
 
 # NÃO copiado de propósito:
 #   .env       → vive só no servidor, contém senhas
