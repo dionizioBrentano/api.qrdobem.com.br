@@ -21,6 +21,11 @@ Route::middleware('throttle:otp')->group(function () {
     Route::get('/auth/register-validate', [\App\Http\Controllers\RegisterController::class, 'validateToken']);
 });
 
+Route::middleware('throttle:public-messages')->group(function () {
+    Route::post('/contact', [\App\Http\Controllers\ContactController::class, 'store']);
+    Route::post('/waitlist', [\App\Http\Controllers\WaitlistController::class, 'store']);
+});
+
 // Webhooks
 // Nota sobre CSRF: No Laravel 11, rotas definidas em routes/api.php utilizam
 // apenas o middleware group 'api', que por padrão NÃO inclui o VerifyCsrfToken.
