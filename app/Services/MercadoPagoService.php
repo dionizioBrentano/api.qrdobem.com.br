@@ -4,6 +4,8 @@ namespace App\Services;
 
 use App\Models\CreditOrder;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Http\Client\ConnectionException;
 
 class MercadoPagoService
 {
@@ -63,8 +65,18 @@ class MercadoPagoService
             'auto_return' => 'approved',
         ];
 
-        $response = Http::withToken($token)
-            ->post('https://api.mercadopago.com/checkout/preferences', $payload);
+        try {
+            $response = Http::withToken($token)
+                ->timeout(10)
+                ->connectTimeout(5)
+                ->post('https://api.mercadopago.com/checkout/preferences', $payload);
+        } catch (ConnectionException $e) {
+            Log::error('MercadoPago createPreference: timeout/conexão', [
+                'external_reference' => $order->external_reference,
+                'message' => $e->getMessage(),
+            ]);
+            return null;
+        }
 
         if ($response->successful()) {
             return $response->json();
@@ -97,11 +109,21 @@ class MercadoPagoService
             ],
         ];
 
-        $response = Http::withToken($token)
-            ->withHeaders([
-                'X-Idempotency-Key' => $order->external_reference,
-            ])
-            ->post('https://api.mercadopago.com/v1/payments', $payload);
+        try {
+            $response = Http::withToken($token)
+                ->timeout(10)
+                ->connectTimeout(5)
+                ->withHeaders([
+                    'X-Idempotency-Key' => $order->external_reference,
+                ])
+                ->post('https://api.mercadopago.com/v1/payments', $payload);
+        } catch (ConnectionException $e) {
+            Log::error('MercadoPago createPixPayment: timeout/conexão', [
+                'external_reference' => $order->external_reference,
+                'message' => $e->getMessage(),
+            ]);
+            return null;
+        }
 
         if ($response->successful()) {
             return $response->json();
@@ -146,17 +168,34 @@ class MercadoPagoService
             $payload['issuer_id'] = $issuerId;
         }
 
-        $response = Http::withToken($accessToken)
-            ->withHeaders([
-                'X-Idempotency-Key' => $order->external_reference,
-            ])
-            ->post('https://api.mercadopago.com/v1/payments', $payload);
+        try {
+            $response = Http::withToken($accessToken)
+                ->timeout(10)
+                ->connectTimeout(5)
+                ->withHeaders([
+                    'X-Idempotency-Key' => $order->external_reference,
+                ])
+                ->post('https://api.mercadopago.com/v1/payments', $payload);
+        } catch (ConnectionException $e) {
+            Log::error('MercadoPago createCardPayment: timeout/conexão', [
+                'external_reference' => $order->external_reference,
+                'message' => $e->getMessage(),
+            ]);
+            return ['_error' => true, '_status' => 0, '_body' => ['connection_error' => $e->getMessage()]];
+        }
 
         if ($response->successful()) {
             return $response->json();
         }
 
-        return null;
+        Log::error('MercadoPago createCardPayment falhou', [
+            'external_reference' => $order->external_reference,
+            'http_status' => $response->status(),
+            'body' => $response->json(),
+        ]);
+
+        // Retorna o corpo do erro (sem o token) para o controller decidir o que expor.
+        return ['_error' => true, '_status' => $response->status(), '_body' => $response->json()];
     }
 
     /**
@@ -166,12 +205,27 @@ class MercadoPagoService
     {
         $token = $this->getAccessToken();
 
-        $response = Http::withToken($token)
-            ->get("https://api.mercadopago.com/v1/payments/{$id}");
+        try {
+            $response = Http::withToken($token)
+                ->timeout(10)
+                ->connectTimeout(5)
+                ->get("https://api.mercadopago.com/v1/payments/{$id}");
+        } catch (ConnectionException $e) {
+            Log::error('MercadoPago getPayment: timeout/conexão', [
+                'payment_id' => $id,
+                'message' => $e->getMessage(),
+            ]);
+            return null;
+        }
 
         if ($response->successful()) {
             return $response->json();
         }
+
+        Log::error('MercadoPago getPayment falhou', [
+            'payment_id' => $id,
+            'http_status' => $response->status(),
+        ]);
 
         return null;
     }

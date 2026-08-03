@@ -208,7 +208,11 @@ class CreditController extends Controller
 
         if (!$payment || !isset($payment['id'])) {
             Log::error('Falha ao criar pagamento Cartão no Mercado Pago', ['external_reference' => $order->external_reference]);
-            return response()->json(['error' => 'Falha ao processar pagamento com Cartão.'], 502);
+            return response()->json([
+                'error' => 'Falha ao processar pagamento com Cartão.',
+                // DEBUG TEMPORÁRIO — remover depois de identificar a causa.
+                'mp_debug' => $payment['_body'] ?? null,
+            ], 502);
         }
 
         $status = $payment['status'];
