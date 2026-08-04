@@ -76,10 +76,11 @@ class OtpController extends Controller
             $tenant->update(['email_verified_at' => now()]);
 
             // Verifica se agora cumpre todos os requisitos para ativação
-            // Gate 1: email verificado + CPF + telefone
+            // Gate 1: email verificado + CPF + telefone + apelido
             $hasCpf = !empty($tenant->cpf);
             $hasPhone = !empty($tenant->phone);
-            if ($hasCpf && $hasPhone) {
+            $hasNickname = !empty($tenant->nickname);
+            if ($hasCpf && $hasPhone && $hasNickname) {
                 $tenant->update(['profile_status' => 'active']);
                 
                 // Concede créditos de onboarding ao atingir o status active

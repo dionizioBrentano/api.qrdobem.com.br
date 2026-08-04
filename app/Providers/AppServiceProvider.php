@@ -36,5 +36,10 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('public-messages', function (Request $request) {
             return Limit::perMinute(10)->by($request->ip());
         });
+
+        // Recuperação de conversa: 5/minuto por IP (anti-brute-force do código de 4 caracteres)
+        RateLimiter::for('conversation-recovery', function (Request $request) {
+            return Limit::perMinute(5)->by($request->ip());
+        });
     }
 }

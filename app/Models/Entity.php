@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 
 class Entity extends Model
@@ -51,5 +52,30 @@ class Entity extends Model
     public function customAttributes(): MorphMany
     {
         return $this->morphMany(CustomAttribute::class, 'owner');
+    }
+
+    public function conversations(): HasMany
+    {
+        return $this->hasMany(EntityConversation::class);
+    }
+
+    public function healthFields(): HasMany
+    {
+        return $this->hasMany(EntityHealthField::class);
+    }
+
+    public function petFields(): HasOne
+    {
+        return $this->hasOne(EntityPetField::class);
+    }
+
+    public function vaccinations(): HasMany
+    {
+        return $this->hasMany(EntityVaccination::class);
+    }
+
+    public function objectFields(): HasOne
+    {
+        return $this->hasOne(EntityObjectField::class);
     }
 }

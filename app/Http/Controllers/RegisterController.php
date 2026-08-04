@@ -36,7 +36,7 @@ class RegisterController extends Controller
             'expires_at' => Carbon::now()->addHours(24)
         ]);
 
-        $frontendUrl = env('FRONTEND_URL', 'https://app.qrdobem.com.br');
+        $frontendUrl = config('qrdobem.frontend_url');
         $link = "{$frontendUrl}/register?token={$tokenPlain}";
 
         try {
@@ -52,6 +52,7 @@ class RegisterController extends Controller
     {
         $request->validate([
             'token' => 'required|string',
+            'origin_conversation_id' => 'nullable|integer|exists:entity_conversations,id',
             // id_token é validado automaticamente pelo middleware auth.firebase
         ]);
 
@@ -80,6 +81,15 @@ class RegisterController extends Controller
         // Marca email como verificado se ainda não estiver
         if (!$tenant->email_verified_at) {
             $tenant->update(['email_verified_at' => Carbon::now()]);
+        }
+
+        // Funil Benfeitor -> Tutor (Degrau 1): quem chegou por uma conversa
+        // ganha um QR de cortesia ao criar a conta.
+        $originConversationId = $request->input('origin_conversation_id');
+
+        if ($originConversationId && !$tenant->originating_conversation_id) {
+            $tenant->update(['originating_conversation_id' => $originConversationId]);
+            app(\App\Services\BenefactorCreditService::class)->grantSignupBatch($tenant->fresh());
         }
 
         return response()->json([

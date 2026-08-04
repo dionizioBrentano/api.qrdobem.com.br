@@ -3,6 +3,8 @@
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\EntityController;
 use App\Http\Controllers\AdminController;
+use App\Http\Controllers\ConversationController;
+use App\Http\Controllers\EmergencyController;
 use App\Http\Controllers\MessageController;
 use App\Http\Controllers\OtpController;
 use App\Http\Controllers\ProfileController;
@@ -48,6 +50,10 @@ Route::middleware('auth.firebase')->group(function () {
     Route::post('/entities', [EntityController::class, 'store']);
     // QR Code gerado pela API (whitelabel: nenhum frontend precisa gerar imagem)
     Route::get('/entities/{unique_code}/qrcode', [EntityController::class, 'qrCode']);
+    Route::post('/entities/{unique_code}/vaccinations', [EntityController::class, 'addVaccination']);
+
+    // Decifragem do CPF de quem declarou emergência (superadmin, auditado)
+    Route::get('/admin/emergency-declarations/{id}/reveal', [EmergencyController::class, 'reveal']);
 
     Route::get('/admin/tenants', [AdminController::class, 'getTenants']);
     // Rota add-quota removida: o método addQuota nunca existiu no AdminController
@@ -58,6 +64,10 @@ Route::middleware('auth.firebase')->group(function () {
     // Inbox (Fase 6)
     Route::get('/messages', [MessageController::class, 'index']);
     Route::post('/messages/{id}/read', [MessageController::class, 'markAsRead']);
+
+    // Chat mediado — lado do tutor
+    Route::post('/conversations/{conversation_id}/reply', [ConversationController::class, 'tenantReply']);
+    Route::post('/conversations/{conversation_id}/resolve', [ConversationController::class, 'resolve']);
 
     // Credits / Checkout (Sprint 10 & S15 & S17)
     Route::get('/credits/mp-public-config', [CreditController::class, 'publicConfig']);
@@ -71,3 +81,17 @@ Route::middleware('auth.firebase')->group(function () {
 // --- Rotas públicas de entidades ---
 Route::get('/entities/{unique_code}', [EntityController::class, 'show']);
 Route::post('/entities/{unique_code}/messages', [MessageController::class, 'storePublic'])->middleware('throttle:public-messages');
+
+// Chat mediado — lado do benfeitor (público)
+Route::middleware('throttle:public-messages')->group(function () {
+    Route::post('/entities/{unique_code}/conversations', [ConversationController::class, 'store']);
+    Route::get('/entities/{unique_code}/conversations/{conversation_id}', [ConversationController::class, 'show']);
+    Route::post('/entities/{unique_code}/conversations/{conversation_id}/messages', [ConversationController::class, 'addMessage']);
+});
+
+Route::post('/entities/{unique_code}/conversations/recover', [ConversationController::class, 'recover'])
+    ->middleware('throttle:conversation-recovery');
+
+// Declaração de emergência (pública)
+Route::post('/entities/{unique_code}/declare-emergency', [EmergencyController::class, 'declare'])
+    ->middleware('throttle:public-messages');

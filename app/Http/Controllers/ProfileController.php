@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use App\Models\TenantDocument;
+use App\Services\CpfValidator;
 
 class ProfileController extends Controller
 {
@@ -34,6 +35,7 @@ class ProfileController extends Controller
 
         $validated = $request->validate([
             'name' => 'sometimes|string|max:255',
+            'nickname' => 'sometimes|string|max:255',
             'phone' => 'sometimes|string|max:20',
             'address_street' => 'sometimes|string|max:255',
             'address_number' => 'sometimes|string|max:20',
@@ -107,7 +109,7 @@ class ProfileController extends Controller
 
     /**
      * Verifica se o tenant cumpre todos os requisitos para 'active' (Gate 1).
-     * Gate 1: email_verified_at + CPF + telefone
+     * Gate 1: email_verified_at + CPF + telefone + apelido
      */
     private function checkAndActivate($tenant)
     {
@@ -121,8 +123,9 @@ class ProfileController extends Controller
                 ->exists();
         $hasPhone = !empty($tenant->phone);
         $hasEmailVerified = !empty($tenant->email_verified_at);
+        $hasNickname = !empty($tenant->nickname);
 
-        if ($hasCpf && $hasPhone && $hasEmailVerified) {
+        if ($hasCpf && $hasPhone && $hasEmailVerified && $hasNickname) {
             $tenant->update(['profile_status' => 'active']);
             
             // Concede créditos de onboarding ao atingir o status active
@@ -146,6 +149,9 @@ class ProfileController extends Controller
         if (empty($tenant->phone)) {
             $purchase[] = 'phone';
         }
+        if (empty($tenant->nickname)) {
+            $purchase[] = 'nickname';
+        }
 
         // Gate 2: tudo do Gate 1 + endereço
         $entity = $purchase;
@@ -158,28 +164,10 @@ class ProfileController extends Controller
 
     /**
      * Validação de CPF com dígito verificador.
+     * O algoritmo vive em CpfValidator, compartilhado com a Declaração de Emergência.
      */
     private function validateCpf(string $cpf): bool
     {
-        $cpf = preg_replace('/\D/', '', $cpf);
-        if (strlen($cpf) !== 11) {
-            return false;
-        }
-        // Rejeita sequências iguais (000.000.000-00, 111.111.111-11, etc.)
-        if (preg_match('/^(\d)\1{10}$/', $cpf)) {
-            return false;
-        }
-
-        for ($t = 9; $t < 11; $t++) {
-            $d = 0;
-            for ($c = 0; $c < $t; $c++) {
-                $d += $cpf[$c] * (($t + 1) - $c);
-            }
-            $d = ((10 * $d) % 11) % 10;
-            if ($cpf[$t] != $d) {
-                return false;
-            }
-        }
-        return true;
+        return app(CpfValidator::class)->isValid($cpf);
     }
 }

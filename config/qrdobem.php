@@ -20,6 +20,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | URL do frontend
+    |--------------------------------------------------------------------------
+    |
+    | Base para os links enviados por e-mail (cadastro, aviso de mensagem nova).
+    | Precisa ficar aqui, e não num env() dentro de controller: com a config
+    | cacheada em produção, env() devolve null e o link sai com o valor padrão.
+    |
+    */
+
+    'frontend_url' => rtrim(env('FRONTEND_URL', 'https://qrdobem.com.br'), '/'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Aparência do QR Code
     |--------------------------------------------------------------------------
     |

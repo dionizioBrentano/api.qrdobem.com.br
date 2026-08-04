@@ -11,6 +11,7 @@ class Tenant extends Model
 
     protected $fillable = [
         'name',
+        'nickname',
         'email',
         'document_number',
         'firebase_uid',
@@ -29,6 +30,7 @@ class Tenant extends Model
         'address_city',
         'address_state',
         'address_zipcode',
+        'originating_conversation_id',
     ];
 
     protected $casts = [

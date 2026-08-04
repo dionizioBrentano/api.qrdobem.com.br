@@ -8,6 +8,8 @@ class EntityMessage extends Model
 {
     protected $fillable = [
         'entity_id',
+        'conversation_id',
+        'sender_type',
         'sender_name',
         'sender_contact',
         'message',
@@ -28,5 +30,10 @@ class EntityMessage extends Model
     public function entity()
     {
         return $this->belongsTo(Entity::class);
+    }
+
+    public function conversation()
+    {
+        return $this->belongsTo(EntityConversation::class, 'conversation_id');
     }
 }

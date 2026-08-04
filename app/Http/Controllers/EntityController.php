@@ -3,11 +3,15 @@
 namespace App\Http\Controllers;
 
 use App\Models\Entity;
+use App\Models\EntityEmergencyDeclaration;
+use App\Models\EntityHealthField;
+use App\Models\EntityObjectField;
 use App\Models\AuditLog;
 use App\Http\Requests\EntityStoreRequest;
 use App\Models\CreditBatch;
 use App\Models\Organization;
 use App\Models\TenantTermAcceptance;
+use App\Services\PiiDetector;
 use App\Services\QrCodeService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -40,7 +44,10 @@ class EntityController extends Controller
             ->sum('amount_available');
 
         // Pega as entidades da Organização
-        $entities = Entity::where('organization_id', $orgId)->orderBy('id', 'desc')->get();
+        $entities = Entity::with(['petFields', 'vaccinations', 'objectFields'])
+            ->where('organization_id', $orgId)
+            ->orderBy('id', 'desc')
+            ->get();
         
         $userOrgs = $tenant->organizations()->get()->map(function($o) {
             return ['id' => $o->id, 'name' => $o->name];
@@ -62,6 +69,11 @@ class EntityController extends Controller
                     'created_at' => $e->created_at ? $e->created_at->format('d/m/Y') : 'Hoje',
                     'is_active' => $e->is_active,
                     'status' => $e->status,
+                    'has_active_emergency' => $this->hasActiveEmergency($e),
+                    // O tutor sempre vê tudo dos próprios registros, sem filtro
+                    // de visibilidade.
+                    'pet_info' => $e->type === 'pet' ? $this->ownerPetInfo($e) : null,
+                    'object_info' => $e->type === 'object' ? $e->objectFields : null,
                 ];
             })
         ]);
@@ -127,6 +139,18 @@ class EntityController extends Controller
             return response()->json(['error' => 'Saldo insuficiente. A organização precisa adquirir créditos.'], 402);
         }
 
+        // Detecção de PII no texto público impresso do objeto. Diferente do chat,
+        // aqui a rejeição é definitiva: não há "enviar mesmo assim" para um texto
+        // que vai para etiqueta física.
+        $publicLabel = $request->input('object_fields.public_label');
+
+        if ($entityType === 'object' && app(PiiDetector::class)->containsContact($publicLabel)) {
+            return response()->json([
+                'error' => 'O texto público não pode conter telefone ou e-mail. Por segurança, o contato acontece apenas pelo QR Code.',
+                'code' => 'CONTACT_DETECTED',
+            ], 422);
+        }
+
         $uniqueCode = (string) Str::uuid();
 
         $entity = Entity::create([
@@ -174,6 +198,75 @@ class EntityController extends Controller
                     'value' => $value,
                 ]);
             }
+        }
+
+        // Campos de saúde estruturados (lista fechada, validada em EntityStoreRequest)
+        foreach ((array) $request->input('health_fields', []) as $field) {
+            $key = $field['field_key'] ?? null;
+            $value = $field['field_value'] ?? null;
+
+            if (!$key || $value === null || trim($value) === '') {
+                continue;
+            }
+
+            $entity->healthFields()->create([
+                'field_key' => $key,
+                // Blindagem de persistência: os sempre-restritos nascem privados
+                // mesmo que algo escape da validação.
+                'is_public' => in_array($key, EntityHealthField::ALWAYS_RESTRICTED, true)
+                    ? false
+                    : filter_var($field['is_public'] ?? false, FILTER_VALIDATE_BOOLEAN),
+                'field_value' => $value,
+            ]);
+        }
+
+        // Campos da trilha Pet. Ignorados se a entidade não for do tipo 'pet'.
+        if ($entityType === 'pet' && $request->filled('pet_fields')) {
+            $petFields = $request->input('pet_fields');
+
+            $entity->petFields()->create([
+                'species' => $petFields['species'],
+                'species_other_description' => $petFields['species'] === 'other'
+                    ? ($petFields['species_other_description'] ?? null)
+                    : null,
+                'size' => $petFields['size'] ?? null,
+                'color' => $petFields['color'] ?? null,
+                'is_neutered' => $petFields['is_neutered'] ?? null,
+                'physical_description' => $petFields['physical_description'] ?? null,
+                'clinical_notes' => $petFields['clinical_notes'] ?? null,
+                'reference_contact' => $petFields['reference_contact'] ?? null,
+                'size_is_public' => filter_var($petFields['size_is_public'] ?? true, FILTER_VALIDATE_BOOLEAN),
+                'color_is_public' => filter_var($petFields['color_is_public'] ?? true, FILTER_VALIDATE_BOOLEAN),
+                'is_neutered_is_public' => filter_var($petFields['is_neutered_is_public'] ?? true, FILTER_VALIDATE_BOOLEAN),
+                'physical_description_is_public' => filter_var($petFields['physical_description_is_public'] ?? true, FILTER_VALIDATE_BOOLEAN),
+                'clinical_notes_is_public' => filter_var($petFields['clinical_notes_is_public'] ?? true, FILTER_VALIDATE_BOOLEAN),
+                'reference_contact_is_public' => filter_var($petFields['reference_contact_is_public'] ?? false, FILTER_VALIDATE_BOOLEAN),
+                'vaccinations_is_public' => filter_var($petFields['vaccinations_is_public'] ?? true, FILTER_VALIDATE_BOOLEAN),
+            ]);
+
+            foreach ((array) $request->input('vaccinations', []) as $vaccination) {
+                $entity->vaccinations()->create([
+                    'vaccine_name' => $vaccination['vaccine_name'],
+                    'applied_at' => $vaccination['applied_at'],
+                ]);
+            }
+        }
+
+        // Campos da trilha Objeto. Ignorados se a entidade não for do tipo 'object'.
+        if ($entityType === 'object' && $request->filled('object_fields')) {
+            $objectFields = $request->input('object_fields');
+
+            $entity->objectFields()->create([
+                'description' => $objectFields['description'] ?? null,
+                'description_is_public' => filter_var($objectFields['description_is_public'] ?? false, FILTER_VALIDATE_BOOLEAN),
+                'public_label' => $objectFields['public_label'] ?? null,
+                'handling_fragile' => filter_var($objectFields['handling_fragile'] ?? false, FILTER_VALIDATE_BOOLEAN),
+                'handling_light_sensitive' => filter_var($objectFields['handling_light_sensitive'] ?? false, FILTER_VALIDATE_BOOLEAN),
+                'handling_keep_refrigerated' => filter_var($objectFields['handling_keep_refrigerated'] ?? false, FILTER_VALIDATE_BOOLEAN),
+                'handling_do_not_invert' => filter_var($objectFields['handling_do_not_invert'] ?? false, FILTER_VALIDATE_BOOLEAN),
+                'handling_sentimental_value' => filter_var($objectFields['handling_sentimental_value'] ?? false, FILTER_VALIDATE_BOOLEAN),
+                'handling_notes_extra' => $objectFields['handling_notes_extra'] ?? null,
+            ]);
         }
 
         // Desconta a cota da organização
@@ -245,11 +338,56 @@ class EntityController extends Controller
         ]);
     }
 
+    /**
+     * Adiciona uma dose ao histórico de vacinação de um pet.
+     *
+     * Único ponto de edição pós-criação que existe hoje — não é uma edição
+     * geral de entidade.
+     */
+    public function addVaccination(Request $request, $unique_code)
+    {
+        $tenant = $request->tenant;
+
+        $entity = Entity::where('unique_code', $unique_code)->first();
+
+        if (!$entity) {
+            return response()->json(['error' => 'Registro não encontrado.'], 404);
+        }
+
+        $orgIds = $tenant->organizations()->pluck('organizations.id')->all();
+
+        if (!in_array($entity->organization_id, $orgIds)) {
+            return response()->json(['error' => 'Acesso negado.'], 403);
+        }
+
+        if ($entity->type !== 'pet') {
+            return response()->json([
+                'error' => 'Histórico de vacinação só existe para registros do tipo Pet.',
+            ], 422);
+        }
+
+        $validated = $request->validate([
+            'vaccine_name' => 'required|string|max:255',
+            'applied_at' => 'required|date_format:Y-m-d',
+        ]);
+
+        $vaccination = $entity->vaccinations()->create($validated);
+
+        return response()->json([
+            'message' => 'Vacina registrada.',
+            'vaccination' => [
+                'id' => $vaccination->id,
+                'vaccine_name' => $vaccination->vaccine_name,
+                'applied_at' => $vaccination->applied_at->format('Y-m-d'),
+            ],
+        ], 201);
+    }
+
     public function show(Request $request, $unique_code)
     {
         // Só entidade ativa aparece publicamente. 'pending_term' e 'suspended'
         // ficam invisíveis — o público não deve nem saber que o código existe.
-        $entity = Entity::with(['organization', 'customAttributes'])
+        $entity = Entity::with(['organization', 'customAttributes', 'healthFields', 'petFields', 'vaccinations', 'objectFields'])
             ->where('unique_code', $unique_code)
             ->where('is_active', true)
             ->where('status', 'active')
@@ -273,7 +411,126 @@ class EntityController extends Controller
             'name' => $entity->encrypted_name,
             'additional_info' => $entity->encrypted_additional_info,
             'custom_attributes' => $entity->customAttributes->pluck('value', 'key'),
+            'health_info' => $this->publicHealthInfo($entity),
+            'pet_info' => $entity->type === 'pet' ? $this->publicPetInfo($entity) : null,
+            'object_info' => $entity->type === 'object' ? $this->publicObjectInfo($entity) : null,
             'organization' => $entity->organization ? $entity->organization->name : 'Organização Desconhecida',
         ]);
+    }
+
+    /**
+     * Dados do pet para o dono, sem filtro de visibilidade, com o histórico
+     * de vacinas junto.
+     */
+    private function ownerPetInfo(Entity $entity): ?array
+    {
+        $pet = $entity->petFields;
+
+        if (!$pet) {
+            return null;
+        }
+
+        return array_merge($pet->toArray(), [
+            'vaccinations' => $entity->vaccinations
+                ->map(fn ($v) => [
+                    'id' => $v->id,
+                    'vaccine_name' => $v->vaccine_name,
+                    'applied_at' => $v->applied_at?->format('Y-m-d'),
+                ])
+                ->values(),
+        ]);
+    }
+
+    /**
+     * Dados do pet visíveis publicamente. `species` é sempre público; os demais
+     * respeitam o toggle do tutor.
+     */
+    private function publicPetInfo(Entity $entity): ?array
+    {
+        $pet = $entity->petFields;
+
+        if (!$pet) {
+            return null;
+        }
+
+        $info = [
+            'species' => $pet->species,
+            'species_other_description' => $pet->species_other_description,
+        ];
+
+        foreach (['size', 'color', 'is_neutered', 'physical_description', 'clinical_notes', 'reference_contact'] as $field) {
+            if ($pet->{$field . '_is_public'} && $pet->{$field} !== null) {
+                $info[$field] = $pet->{$field};
+            }
+        }
+
+        if ($pet->vaccinations_is_public) {
+            $info['vaccinations'] = $entity->vaccinations
+                ->map(fn ($v) => [
+                    'vaccine_name' => $v->vaccine_name,
+                    'applied_at' => $v->applied_at?->format('Y-m-d'),
+                ])
+                ->values();
+        }
+
+        return $info;
+    }
+
+    /**
+     * Dados do objeto visíveis publicamente. `public_label` e os avisos de
+     * manuseio são sempre públicos; a descrição depende do toggle do tutor.
+     */
+    private function publicObjectInfo(Entity $entity): ?array
+    {
+        $object = $entity->objectFields;
+
+        if (!$object) {
+            return null;
+        }
+
+        $info = ['public_label' => $object->public_label];
+
+        if ($object->description_is_public && $object->description !== null) {
+            $info['description'] = $object->description;
+        }
+
+        foreach (EntityObjectField::HANDLING_FLAGS as $flag) {
+            $info[$flag] = $object->{$flag};
+        }
+
+        $info['handling_notes_extra'] = $object->handling_notes_extra;
+
+        return $info;
+    }
+
+    /**
+     * Campos de saúde visíveis na leitura pública normal.
+     *
+     * Só os marcados como públicos pelo tutor, e nunca `caregiver_contact` —
+     * contato direto não circula fora do chat mediado. Os sempre-restritos
+     * (`continuous_medications`, `substance_use_risk`) já nascem privados.
+     */
+    private function publicHealthInfo(Entity $entity)
+    {
+        // Sob emergência declarada, tudo aparece — inclusive os sempre-restritos
+        // e o contato do cuidador, independente de is_public.
+        if ($this->hasActiveEmergency($entity)) {
+            return $entity->healthFields->pluck('field_value', 'field_key');
+        }
+
+        return $entity->healthFields
+            ->where('is_public', true)
+            ->where('field_key', '!=', EntityHealthField::NEVER_PUBLIC_IN_NORMAL_VIEW)
+            ->pluck('field_value', 'field_key');
+    }
+
+    /**
+     * Emergência ativa = declaração feita dentro da janela de validade.
+     */
+    private function hasActiveEmergency(Entity $entity): bool
+    {
+        return EntityEmergencyDeclaration::where('entity_id', $entity->id)
+            ->where('declared_at', '>', now()->subHours(EntityEmergencyDeclaration::ACTIVE_WINDOW_HOURS))
+            ->exists();
     }
 }
