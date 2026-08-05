@@ -11,6 +11,7 @@ class RegistrationToken extends Model
 
     protected $fillable = [
         'email',
+        'trail',
         'token_hash',
         'expires_at',
         'used_at'

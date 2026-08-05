@@ -15,7 +15,8 @@ class RegisterController extends Controller
     public function sendLink(Request $request)
     {
         $request->validate([
-            'email' => 'required|email'
+            'email' => 'required|email',
+            'trail' => 'nullable|in:pet,person,object'
         ]);
 
         $email = $request->email;
@@ -32,6 +33,7 @@ class RegisterController extends Controller
 
         RegistrationToken::create([
             'email' => $email,
+            'trail' => $request->input('trail'),
             'token_hash' => $tokenHash,
             'expires_at' => Carbon::now()->addHours(24)
         ]);
@@ -114,6 +116,9 @@ class RegisterController extends Controller
             return response()->json(['error' => 'Token inválido ou expirado.'], 400);
         }
 
-        return response()->json(['email' => $registrationToken->email]);
+        return response()->json([
+            'email' => $registrationToken->email,
+            'trail' => $registrationToken->trail,
+        ]);
     }
 }
