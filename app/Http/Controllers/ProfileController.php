@@ -4,10 +4,32 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use App\Models\TenantDocument;
+use App\Services\CpfIdentityService;
 use App\Services\CpfValidator;
+use Illuminate\Support\Facades\Log;
 
+/**
+ * ProfileController — coleta progressiva de dados e Gates 1 e 2.
+ *
+ * ALTERAÇÃO DESTA VERSÃO (Fase 0, entrega 0.9 do PLANO_TRILHAS_2026-08.md):
+ * ao cadastrar o CPF, a conta passa a ser ligada à pessoa natural
+ * correspondente (`people`), via CpfIdentityService. É essa ligação que faz
+ * as várias contas do mesmo CPF aparecerem agrupadas no painel (TX-R03).
+ *
+ * A ligação acontece exatamente aqui, e não em outro lugar, porque é aqui
+ * que a conta COMPROVA a posse do próprio CPF. CPF não é segredo: nenhuma
+ * consulta do sistema pode partir de um CPF digitado — sempre parte da
+ * conta autenticada. Ver §3.F10 do plano.
+ *
+ * O restante do comportamento é o mesmo da versão anterior: nada foi
+ * removido, nenhuma regra de Gate foi alterada.
+ */
 class ProfileController extends Controller
 {
+    public function __construct(private CpfIdentityService $identity)
+    {
+    }
+
     /**
      * Retorna dados atuais do perfil + o que falta para cada gate.
      */
@@ -23,6 +45,11 @@ class ProfileController extends Controller
             'missing_for_entity' => $missing['entity'],
             'can_purchase' => empty($missing['purchase']),
             'can_create_entity' => empty($missing['entity']),
+            // Quantas contas o usuário tem sob o mesmo CPF. O frontend usa
+            // para decidir se mostra o seletor de contas (TX-R04).
+            'linked_accounts_count' => $tenant->person_id
+                ? $this->identity->accountsOf($tenant)->count()
+                : 1,
         ]);
     }
 
@@ -81,6 +108,23 @@ class ProfileController extends Controller
             }
             // Atualiza também o campo cpf na tabela tenants (atalho para Gate 1)
             $tenant->update(['cpf' => $cpfClean]);
+
+            // Liga a conta à pessoa natural dona deste CPF (TX-R03).
+            //
+            // Envolvido em try/catch de propósito: se a tabela `people`
+            // ainda não existir no servidor (migration 2026_08_06_000003
+            // não aplicada), o cadastro de CPF NÃO pode quebrar. A ligação
+            // é recuperável depois com `php artisan people:backfill`; o
+            // Gate 1 travado não é.
+            try {
+                $this->identity->linkTenantToPerson($tenant, $cpfClean);
+                $tenant = $tenant->fresh();
+            } catch (\Throwable $e) {
+                Log::warning('ProfileController: falha ao ligar conta à pessoa', [
+                    'tenant_id' => $tenant->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
 
         // Verifica duplicata (mesmo tipo = atualiza)
@@ -127,7 +171,7 @@ class ProfileController extends Controller
 
         if ($hasCpf && $hasPhone && $hasEmailVerified && $hasNickname) {
             $tenant->update(['profile_status' => 'active']);
-            
+
             // Concede créditos de onboarding ao atingir o status active
             app(\App\Services\OnboardingCreditService::class)->grantOnboardingBatch($tenant);
         }

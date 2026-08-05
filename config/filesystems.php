@@ -38,6 +38,27 @@ return [
             'report' => false,
         ],
 
+        /*
+        | Disco privado das mídias (Fase 3, T2-R05).
+        |
+        | Fotos e vídeos de prova social ficam AQUI e não em `public`, por
+        | duas razões:
+        |   1. mídia nasce pendente de moderação, e o que ainda não foi
+        |      aprovado não pode ser alcançável por URL;
+        |   2. mídia reprovada continua no disco até a exclusão, e caminho
+        |      público adivinhável a exporia.
+        |
+        | A entrega passa por `GET /api/media/{id}` (MediaController@serve),
+        | que confere o status antes de servir o arquivo.
+        */
+        'private' => [
+            'driver' => 'local',
+            'root' => storage_path('app/media'),
+            'serve' => false,
+            'throw' => false,
+            'report' => false,
+        ],
+
         'public' => [
             'driver' => 'local',
             'root' => storage_path('app/public'),

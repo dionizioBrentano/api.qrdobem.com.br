@@ -15,6 +15,19 @@ return Application::configure(basePath: dirname(__DIR__))
         // Registra o nosso middleware do Firebase para proteger as rotas!
         $middleware->alias([
             'auth.firebase' => \App\Http\Middleware\FirebaseAuth::class,
+
+            // Autenticação que NÃO bloqueia (Fase 4, T4-R09).
+            // Usada nas rotas públicas da URL do beneficiário: sem token a
+            // requisição segue como pública; com token válido, o tenant é
+            // preenchido para que a confirmação por TUTOR possa exigir que
+            // o tutor esteja identificado.
+            'auth.firebase.optional' => \App\Http\Middleware\OptionalFirebaseAuth::class,
+
+            // API pública de parceiros (Fase 5, T3-R01).
+            // Aceita o escopo exigido como parâmetro: 'api.key:entities.read'.
+            // Assim a rota declara o que precisa, e a verificação não fica
+            // espalhada dentro dos controllers.
+            'api.key' => \App\Http\Middleware\ApiKeyAuth::class,
         ]);
 
         // Rate limiting global para API

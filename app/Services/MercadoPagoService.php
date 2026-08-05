@@ -249,6 +249,180 @@ class MercadoPagoService
     }
 
     /**
+     * Preferência de checkout para uma DOAÇÃO (Fase 4, T4-R01/T4-R02).
+     *
+     * Separada de createPreference() de propósito: a doação tem outra
+     * descrição, outra volta de URL e outro metadata. Reaproveitar o método
+     * de créditos obrigaria a encher de condicional um caminho que já é
+     * crítico — e créditos e doações não podem se confundir na conciliação.
+     *
+     * O `external_reference` leva o prefixo `donation-` justamente para que
+     * a conciliação bancária distinga um do outro sem consultar o banco.
+     */
+    public function createDonationPreference(\App\Models\Donation $donation): ?array
+    {
+        $token = $this->getAccessToken();
+        $frontendUrl = rtrim(config('mercadopago.frontend_url'), '/');
+
+        $causeName = $donation->cause?->name ?? 'QR do Bem';
+        $reference = 'donation-' . $donation->id;
+
+        $payload = [
+            'items' => [
+                [
+                    'title' => 'Doação — ' . $causeName,
+                    'quantity' => 1,
+                    'unit_price' => (float) $donation->amount,
+                    'currency_id' => 'BRL',
+                ],
+            ],
+            'external_reference' => $reference,
+            'metadata' => [
+                'kind' => 'donation',
+                'donation_id' => $donation->id,
+                'cause_space_id' => $donation->cause_space_id,
+                'donor_tenant_id' => $donation->donor_tenant_id,
+            ],
+            'back_urls' => [
+                'success' => $frontendUrl . '/doacoes?status=success',
+                'pending' => $frontendUrl . '/doacoes?status=pending',
+                'failure' => $frontendUrl . '/doacoes?status=failure',
+            ],
+            'auto_return' => 'approved',
+        ];
+
+        try {
+            $response = Http::withToken($token)
+                ->timeout(10)
+                ->connectTimeout(5)
+                ->post('https://api.mercadopago.com/checkout/preferences', $payload);
+        } catch (ConnectionException $e) {
+            Log::error('MercadoPago createDonationPreference: timeout/conexão', [
+                'donation_id' => $donation->id,
+                'message' => $e->getMessage(),
+            ]);
+            return null;
+        }
+
+        if ($response->successful()) {
+            return $response->json();
+        }
+
+        Log::error('MercadoPago createDonationPreference falhou', [
+            'donation_id' => $donation->id,
+            'http_status' => $response->status(),
+            'body' => $response->json(),
+        ]);
+
+        return null;
+    }
+
+    /**
+     * Assinatura de doação recorrente — Preapproval (Fase 4, T4-R04).
+     *
+     * `back_url` é obrigatório pelo Mercado Pago neste recurso, mesmo que o
+     * fluxo termine no app: sem ele a criação é recusada.
+     */
+    public function createPreapproval(\App\Models\DonationSubscription $subscription): ?array
+    {
+        $token = $this->getAccessToken();
+        $frontendUrl = rtrim(config('mercadopago.frontend_url'), '/');
+
+        $payerEmail = $subscription->donor?->email;
+
+        if (!$payerEmail) {
+            Log::error('MercadoPago createPreapproval: doador sem e-mail', [
+                'subscription_id' => $subscription->id,
+            ]);
+            return null;
+        }
+
+        $causeName = $subscription->cause?->name ?? 'QR do Bem';
+
+        $payload = [
+            'reason' => 'Doação mensal — ' . $causeName,
+            'external_reference' => 'subscription-' . $subscription->id,
+            'payer_email' => $payerEmail,
+            'back_url' => $frontendUrl . '/doacoes?subscription=ok',
+            'auto_recurring' => [
+                'frequency' => 1,
+                'frequency_type' => 'months',
+                'transaction_amount' => (float) $subscription->amount,
+                'currency_id' => 'BRL',
+            ],
+            'status' => 'pending',
+        ];
+
+        try {
+            $response = Http::withToken($token)
+                ->timeout(10)
+                ->connectTimeout(5)
+                ->post('https://api.mercadopago.com/preapproval', $payload);
+        } catch (ConnectionException $e) {
+            Log::error('MercadoPago createPreapproval: timeout/conexão', [
+                'subscription_id' => $subscription->id,
+                'message' => $e->getMessage(),
+            ]);
+            return null;
+        }
+
+        if ($response->successful()) {
+            return $response->json();
+        }
+
+        Log::error('MercadoPago createPreapproval falhou', [
+            'subscription_id' => $subscription->id,
+            'http_status' => $response->status(),
+            'body' => $response->json(),
+        ]);
+
+        return null;
+    }
+
+    /**
+     * Cancela a assinatura recorrente no Mercado Pago.
+     *
+     * Devolve bool em vez de array: o chamador não tem o que fazer com o
+     * corpo da resposta, e um cancelamento que falha no MP não pode impedir
+     * o cancelamento local — ver DonationController::cancelSubscription().
+     */
+    public function cancelPreapproval(\App\Models\DonationSubscription $subscription): bool
+    {
+        if (!$subscription->mp_preapproval_id) {
+            return false;
+        }
+
+        $token = $this->getAccessToken();
+
+        try {
+            $response = Http::withToken($token)
+                ->timeout(10)
+                ->connectTimeout(5)
+                ->put(
+                    'https://api.mercadopago.com/preapproval/' . $subscription->mp_preapproval_id,
+                    ['status' => 'cancelled']
+                );
+        } catch (ConnectionException $e) {
+            Log::error('MercadoPago cancelPreapproval: timeout/conexão', [
+                'subscription_id' => $subscription->id,
+                'message' => $e->getMessage(),
+            ]);
+            return false;
+        }
+
+        if ($response->successful()) {
+            return true;
+        }
+
+        Log::error('MercadoPago cancelPreapproval falhou', [
+            'subscription_id' => $subscription->id,
+            'http_status' => $response->status(),
+        ]);
+
+        return false;
+    }
+
+    /**
      * Busca os detalhes de um pagamento no Mercado Pago.
      */
     public function getPayment(string $id): ?array

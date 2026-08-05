@@ -44,6 +44,161 @@ A autenticação é feita delegando a verificação de credenciais ao Firebase n
 - `POST /api/auth/send-otp`: Dispara email. Body: `{"email": "...", "firebase_uid": "..."}`.
 - `POST /api/auth/verify-otp`: Confirma código. Body: `{"firebase_uid": "...", "code": "123456"}`. O código expira em 15 minutos. Sucesso assinala `email_verified_at` no banco e tenta ativar o Gate 1.
 
+## 4.1. Identidade da Pessoa: Contas Múltiplas e Vínculos
+
+**Adicionado na Fase 0 (06/08/2026).** Referência: `PLANO_TRILHAS_2026-08.md`, fundação F10, requisitos TX-R02 a TX-R04.
+
+### Conceito
+
+O sistema distingue três coisas que antes se confundiam:
+
+| Entidade | Responde |
+|---|---|
+| `Person` | Quem é a pessoa natural (1 por CPF) |
+| `Tenant` | Qual é a **conta** (várias por pessoa, e-mails diferentes) |
+| `Space` | Em qual **contexto** se opera (família, causa, empresa, doação) |
+
+Um CPF pode ter várias contas com e-mails diferentes. Isso é legítimo e suportado. A ligação conta → pessoa acontece automaticamente quando a conta cadastra o CPF em `POST /api/profile/documents` (Gate 1).
+
+### Regra de segurança que o frontend precisa respeitar
+
+**Nenhum endpoint aceita CPF vindo do cliente para consultar vínculos.** CPF não é segredo — está em nota fiscal, é pedido em farmácia e vaza em incidente de terceiro. Um endpoint "informe o CPF e veja os vínculos" seria um consultor de vínculos sociais de qualquer brasileiro, num sistema que também guarda alergia, medicação e endereço.
+
+As contas aparecem porque **cada uma comprovou a posse do próprio CPF dentro dela mesma**. Não construa tela que peça CPF para "encontrar minhas contas": ela não vai funcionar, e não deve.
+
+### Endpoints
+
+- `GET /api/me/accounts` — contas da mesma pessoa, incluindo a atual. Cada item traz `id`, `name`, `nickname`, `email`, `role`, `profile_status`, `is_current`. Também devolve `linked` (booleano: a conta já está ligada a uma pessoa?) e `total`.
+- `GET /api/me/links` — vínculos consolidados da pessoa. Cada item traz `space_id`, `space_name`, `space_type`, `space_slug`, `role`, `pending`, `permissions[]` e `through_account` (por qual conta o vínculo existe). Também devolve `by_type`, com a contagem por tipo de trilha.
+- `POST /api/me/switch-account` — body `{ "target_tenant_id": 123 }`. Valida que a conta de destino é da mesma pessoa.
+
+### Limitação conhecida do switch-account
+
+A identidade neste sistema é o JWT do Firebase, e o backend **não possui credencial de serviço do Firebase Admin SDK** — portanto não consegue emitir token para outra conta. A troca de conta hoje é **assistida**, não silenciosa:
+
+```json
+{
+  "target": { "id": 123, "name": "...", "email": "..." },
+  "method": "reauth",
+  "message": "Confirme a senha da conta de destino para concluir a troca."
+}
+```
+
+O frontend deve tratar `method: "reauth"` levando o usuário ao login com o e-mail de destino preenchido. Para a troca ser silenciosa é preciso adotar o Firebase Admin SDK com service account (decisão D10 do plano) — é decisão de arquitetura e custo operacional, não linha de código faltando.
+
+O campo `method` existe justamente para que o frontend não precise mudar quando essa decisão for tomada.
+
+## 4.2. Trilha Família: Árvore, 2FA e Botão de Pânico
+
+**Adicionado na Fase 1 (06/08/2026).** Requisitos T1-R01, T1-R02, T1-R05, T1-R07.
+
+### Árvore genealógica (T1-R02)
+
+A árvore é um **grafo**, não uma hierarquia. Cônjuges são ligação horizontal, noras e genros entram por afinidade, segundos casamentos criam meio-irmãos. Cada vínculo é uma aresta tipada entre duas entidades do mesmo espaço.
+
+- `GET /api/spaces/{space}/family` — devolve `nodes` (perfis), `edges` (vínculos) e `relation_types` (dicionário para montar o seletor sem duplicar rótulo no frontend). Cada aresta traz `label`, `inverse_type` e `inverse_label` já calculados.
+- `POST /api/spaces/{space}/family` — body `from_entity_id`, `to_entity_id`, `relation_type`, `note?`. Leitura: *(from) É (relation_type) DE (to)*.
+- `DELETE /api/spaces/{space}/family/{relationship}`
+
+**Tipos:** `parent_of`, `child_of`, `grandparent_of`, `grandchild_of`, `guardian_of`, `ward_of`, `spouse_of`, `sibling_of`, `parent_in_law_of`, `child_in_law_of`, `sibling_in_law_of`, `caretaker_of`, `pet_of`.
+
+Simétricos (`spouse_of`, `sibling_of`, `sibling_in_law_of`) são gravados **uma vez** e valem nos dois sentidos. Os demais têm inverso derivado na leitura — não grave o inverso à mão, ou a árvore fica com vínculo duplicado.
+
+`parent_of` cobre pai e mãe de propósito: o gênero está na entidade, não no parentesco. Assim adoção, duas mães e dois pais entram sem caso especial.
+
+**Erros:** `SELF_RELATION` (422), `ENTITY_NOT_IN_SPACE` (422), `DUPLICATE_RELATION` (422), `CYCLE_DETECTED` (422 — o vínculo colocaria a mesma pessoa como ascendente e descendente).
+
+**Sem limite de perfis por conta (T1-R01).** A cobrança é por crédito de QR Code, não por perfil: pessoa da família pode existir na árvore sem ter QR próprio.
+
+### Verificação em duas etapas (T1-R05)
+
+TOTP padrão (SHA1, 6 dígitos, 30 s), compatível com Google Authenticator, Authy e Microsoft Authenticator. Implementado sem biblioteca externa — `composer require` em CPanel é ponto recorrente de falha de deploy, e o algoritmo é padrão fechado.
+
+- `GET /api/2fa/status`
+- `POST /api/2fa/setup` — gera segredo, devolve `secret` e `provisioning_uri`. **Não ativa nada ainda.**
+- `POST /api/2fa/confirm` `{code}` — ativa e devolve os `recovery_codes` **uma única vez**.
+- `POST /api/2fa/verify` `{code}` — aceita código do app ou de recuperação.
+- `POST /api/2fa/disable` `{code}` — exige código válido.
+
+O fluxo é de duas etapas de propósito: sem a confirmação, quem fecha a tela antes de escanear ficaria trancado fora da conta com um segredo que não guardou.
+
+**Escopo honesto:** o 2FA **não é exigido no login** — o login é do Firebase, e interceptá-lo exigiria trocar o fluxo de autenticação inteiro. Ele protege as operações sensíveis do próprio sistema (repasse, alteração de permissão, revelação de dado).
+
+### Botão de Pânico (T1-R07) — versão rústica
+
+**Decisão do proprietário (06/08/2026):** sai agora, sem esperar o WhatsApp. O frontend é instalado como app (PWA) e funciona ele próprio como alarme; o backend registra o acionamento e avisa a família pelos canais que existem hoje (e-mail).
+
+- `POST /api/spaces/{space}/panic` — autenticado, do app instalado. Body: `latitude?`, `longitude?`, `location_accuracy?`, `note?`, `entity_id?`. Exige permissão `panic.trigger`.
+- `POST /api/entities/{unique_code}/panic` — **público**, para quem leu o QR. Sem autenticação por definição: quem encontrou a pessoa na rua não tem conta. Throttle aplicado.
+- `GET /api/spaces/{space}/panic` — histórico com contagem de avisados e falhas.
+- `POST /api/panic/{event}/resolve` `{false_alarm?}` — exige `panic.configure`.
+
+**Princípio que governa o código: nada impede o alerta.** O evento é gravado **antes** de qualquer envio; falha de um destinatário não interrompe os outros; falha de todos ainda devolve 201 com o evento criado, e o app continua tocando o alarme local. Resposta de erro que faz o app desistir é pior que alerta parcial.
+
+A resposta pública **não** revela quem nem quantos foram avisados — isso mapearia a família para um estranho.
+
+**Alarme no frontend:** sirene por Web Audio (dois tons alternados), vibração e tela vermelha. Começa **antes** da chamada à API e não para se ela falhar. Limitação de navegador, não do código: som exige gesto do usuário, então não há acionamento automático em segundo plano — isso pede app nativo, que é a versão definitiva.
+
+**Quando o WhatsApp entrar:** basta registrar o driver no `NotificationDispatcher`. A ordem de canais já é `['whatsapp', 'mail']` e o template já se chama `panic_alert`. Nenhuma linha do `PanicController` muda.
+
+## 4.3. Trilha Grupos e Causas
+
+**Adicionado na Fase 3 (06/08/2026).** Requisitos T2-R01 a T2-R05.
+
+### Espaços (F1) e cadastro sem CNPJ (T2-R01)
+
+- `GET /api/spaces` — espaços do usuário, com as permissões efetivas em cada um.
+- `POST /api/spaces` — body `type` (`family|cause|company|donation`), `name`, `organization_id?` e, para causa, `headline?`, `story?`, `category?`, `city?`, `state?`, `goal_amount?`.
+- `GET /api/spaces/{space}`, `PUT /api/spaces/{space}`
+- `POST /api/spaces/{space}/children` — body `child_space_id`.
+
+**`organization_id` é opcional de propósito.** Criar uma causa não exige CNPJ: pessoa física liderando iniciativa autônoma usa o próprio CPF, já validado no Gate 1. Exigir CNPJ excluiria exatamente quem a trilha existe para atender.
+
+**Guarda-chuva (T2-R02):** quem chama `children` é o dono do espaço-mãe, **nunca** o grupo apoiado. Se o filho pudesse se pendurar sozinho numa OSCIP, qualquer um se declararia apoiado por ela — e é esse vínculo que dá lastro fiscal ao recibo do doador. Erros: `SELF_PARENT`, `CYCLE_DETECTED`.
+
+### Vitrine da causa (T2-R04, T2-R05)
+
+Públicos:
+- `GET /api/causes` — filtros `?category=`, `?state=`, `?q=`. Só causas publicadas.
+- `GET /api/causes/{slug}` — história, números, prestação de contas, mídia aprovada e o guarda-chuva quando existir.
+
+Autenticados:
+- `PUT /api/spaces/{space}/cause`
+- `POST /api/spaces/{space}/cause/publish` — body `publish`.
+
+Publicar exige `headline` e `story` preenchidos (erro `INCOMPLETE_SHOWCASE`): causa sem história contada não convence a doar e ocupa espaço na listagem de quem se deu ao trabalho.
+
+`raised_amount` é denormalizado — a vitrine é pública e não pode somar a tabela de doações a cada visita. Atualizado quando a doação é confirmada (Fase 4).
+
+### Mídia com moderação (T2-R05)
+
+- `POST /api/spaces/{space}/media` — **multipart**, campo `file` e `caption?`. Máx. 20 MB. Aceita JPG, PNG, WEBP, MP4, MOV.
+- `GET /api/spaces/{space}/media` — inclui pendentes, para quem modera.
+- `POST /api/media/{media}/moderate` — body `approve`, `reason?`.
+- `DELETE /api/media/{media}`
+- `GET /api/media/{media}` — **público, mas só serve mídia aprovada.**
+
+Três regras que não se negociam, e o frontend não tem como burlar:
+
+1. **O MIME é lido do conteúdo do arquivo, não da extensão.** Um `.jpg` que na verdade é PHP, servido de diretório executável, é execução remota. O nome gravado é gerado pelo servidor — nome enviado pelo usuário é vetor de path traversal e extensão dupla.
+2. **Storage privado** (disco `private`, em `storage/app/media`). Nada em `public/`. Exige a chave `private` em `config/filesystems.php` — já incluída.
+3. **Nasce `pending`.** Foto de terceiro pode trazer rosto de menor, endereço legível ao fundo, documento sobre a mesa. Publicação automática é inaceitável.
+
+### QR Codes em lote (T2-R03)
+
+- `POST /api/spaces/{space}/qr-batches` — body `quantity` (1 a 500), `label?`.
+- `GET /api/spaces/{space}/qr-batches`
+- `GET /api/qr-batches/{batch}`
+- `GET /api/qr-batches/{batch}/print` — **folha A4 em HTML**, 24 etiquetas por página, com guias de corte.
+
+**Dois "lotes" no sistema, nomes parecidos, coisas diferentes:** `credit_batches` é o lote de CRÉDITO comprado; `qr_print_batches` é o lote de IMPRESSÃO. O segundo consome o primeiro.
+
+**As entidades do lote nascem `pending_term`.** A etiqueta existe e pode ser colada, mas a página pública só abre depois que alguém assume a responsabilidade e aceita o termo. Gerar já ativo criaria centenas de páginas públicas sem responsável — exatamente o que a arquitetura de termos existe para impedir.
+
+**HTML e não PDF de propósito:** gerar PDF exigiria dependência nova (dompdf/mpdf), e `composer require` em CPanel é ponto recorrente de falha de deploy. O navegador imprime HTML em PDF com o mesmo resultado prático.
+
+A folha abre em aba nova, que não carrega o header `Authorization` — por isso o link leva o token em `?id_token=`, forma que o `FirebaseAuth` já aceita.
+
 ## 5. Catálogo de Endpoints
 
 | Método | Path | Auth | Request (JSON/Body) | Response Sucesso | Erros Possíveis | Notas |
@@ -54,6 +209,33 @@ A autenticação é feita delegando a verificação de credenciais ao Firebase n
 | GET | `/api/profile` | Sim | N/A | 200: Dados do tenant e missing fields | 401 | Usar para montar onboarding UI. |
 | PUT | `/api/profile` | Sim | `name`, `phone`, `address_*` | 200: Perfil atualizado | 422 | Ativa perfil se Gate 1 cumprido. |
 | POST | `/api/profile/documents`| Sim | `document_type`, `document_number`, ... | 200: Documento criado | 422 (CPF inválido) | |
+| GET | `/api/spaces` | Sim | N/A | 200: `spaces[]` com permissões | 401 | |
+| POST | `/api/spaces` | Sim | `type`, `name`, `organization_id?` | 201: espaço criado | 403 (perfil incompleto) | CNPJ não é exigido (T2-R01). |
+| POST | `/api/spaces/{id}/children` | Sim | `child_space_id` | 200 | 422 (`SELF_PARENT`, `CYCLE_DETECTED`) | Chamado pelo guarda-chuva. |
+| GET | `/api/causes` | **Não** | `?category=`, `?state=`, `?q=` | 200: `causes[]` | — | Só publicadas. |
+| GET | `/api/causes/{slug}` | **Não** | N/A | 200: vitrine + mídia aprovada | 404 | |
+| PUT | `/api/spaces/{id}/cause` | Sim | `headline`, `story`, `accountability`... | 200 | 403, 404 | |
+| POST | `/api/spaces/{id}/cause/publish` | Sim | `publish` | 200: `public_url` | 422 (`INCOMPLETE_SHOWCASE`) | Exige chamada e história. |
+| POST | `/api/spaces/{id}/media` | Sim | multipart: `file`, `caption?` | 201: status `pending` | 422 (`INVALID_MIME`) | Máx. 20 MB. MIME lido do conteúdo. |
+| POST | `/api/media/{id}/moderate` | Sim | `approve`, `reason?` | 200 | 403, 404 | Exige `space.edit`. |
+| GET | `/api/media/{id}` | **Não** | N/A | 200: arquivo | 404 | Só serve mídia aprovada. |
+| POST | `/api/spaces/{id}/qr-batches` | Sim | `quantity`, `label?` | 201: `print_url` | 402 (`INSUFFICIENT_CREDITS`) | Máx. 500 por lote. |
+| GET | `/api/qr-batches/{id}/print` | Sim | `?id_token=` | 200: folha A4 em HTML | 403, 404 | Aba nova não leva header. |
+| GET | `/api/spaces/{id}/family` | Sim | N/A | 200: `nodes[]`, `edges[]`, `relation_types[]` | 403, 404 | Grafo de parentesco. Ver §4.2. |
+| POST | `/api/spaces/{id}/family` | Sim | `from_entity_id`, `to_entity_id`, `relation_type` | 201: vínculo criado | 422 (ciclo, duplicata, fora do espaço) | Exige `entity.edit`. |
+| DELETE | `/api/spaces/{id}/family/{rel}` | Sim | N/A | 200 | 403, 404 | SoftDelete, mantém rastreabilidade. |
+| GET | `/api/2fa/status` | Sim | N/A | 200: `enabled`, `pending_setup` | 401 | |
+| POST | `/api/2fa/setup` | Sim | N/A | 200: `secret`, `provisioning_uri` | 422 (já ativo) | Não ativa ainda. |
+| POST | `/api/2fa/confirm` | Sim | `code` | 200: `recovery_codes[]` | 422 | Códigos exibidos uma única vez. |
+| POST | `/api/2fa/verify` | Sim | `code` | 200: `verified`, `method` | 422 | Aceita código do app ou de recuperação. |
+| POST | `/api/2fa/disable` | Sim | `code` | 200 | 422 | Exige código válido. |
+| POST | `/api/spaces/{id}/panic` | Sim | `latitude?`, `longitude?`, `note?` | 201: `event_id`, `notified`, `failed` | 403 | Exige `panic.trigger`. |
+| POST | `/api/entities/{code}/panic` | **Não** | `latitude?`, `longitude?` | 201: `event_id`, `notified` | 404 | Público, com throttle. Não revela a família. |
+| GET | `/api/spaces/{id}/panic` | Sim | N/A | 200: `events[]` | 403 | Histórico, últimos 50. |
+| POST | `/api/panic/{id}/resolve` | Sim | `false_alarm?` | 200 | 403, 404 | Exige `panic.configure`. |
+| GET | `/api/me/accounts` | Sim | N/A | 200: `accounts[]`, `linked`, `total` | 401 | Contas do mesmo CPF. Nunca recebe CPF. |
+| GET | `/api/me/links` | Sim | N/A | 200: `links[]`, `by_type`, `total` | 401 | Vínculos da pessoa em espaços. |
+| POST | `/api/me/switch-account` | Sim | `target_tenant_id` | 200: `target`, `method: "reauth"` | 404 (não é sua), 422 (sem CPF / já é a atual) | Troca assistida. Ver §4.1. |
 | GET | `/api/entities` | Sim | `?organization_id=` (opcional) | 200: Lista de QRs e `quota` | 401, 403 (Nenhuma org vinculada) | Retorna entidades e cota ativa. |
 | POST | `/api/entities` | Sim | `type`, `name`, `accept_term`, infos... | 201: URL e base64 do QR | 402, 403, 422 | Ver fluxo canônico (Gate 2). |
 | GET | `/api/entities/{code}/qrcode` | Sim | `?format=svg|json`, `?size=512` | 200: SVG cru ou JSON c/ Base64 | 403, 404, 503 | Só o dono pode gerar/baixar a imagem. |

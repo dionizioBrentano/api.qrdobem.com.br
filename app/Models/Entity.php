@@ -10,12 +10,28 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 
+/**
+ * Entity — o registro por trás de um QR Code (pessoa, pet ou objeto).
+ *
+ * ALTERAÇÃO DESTA VERSÃO (Fase 0, entrega 0.1 do PLANO_TRILHAS_2026-08.md):
+ *   + `space_id` no fillable
+ *   + relação `space()`
+ *
+ * `organization_id` foi mantido intacto de propósito. Durante a transição
+ * as duas colunas coexistem: o backfill (`php artisan spaces:backfill`)
+ * preenche `space_id` a partir da organização, e só na entrega 0.5 os
+ * controllers passam a consultar por espaço. Remover a coluna antiga antes
+ * disso deixaria o sistema em produção sem caminho de volta.
+ */
 class Entity extends Model
 {
     use HasFactory, SoftDeletes;
 
     protected $fillable = [
         'organization_id',
+        // Espaço ao qual a entidade pertence (F1). Nullable durante a
+        // transição; passa a obrigatório em migration futura.
+        'space_id',
         'credit_batch_id',
         'unique_code',
         'type',
@@ -42,6 +58,12 @@ class Entity extends Model
     public function organization(): BelongsTo
     {
         return $this->belongsTo(Organization::class);
+    }
+
+    /** Espaço de trilha ao qual a entidade pertence (F1). */
+    public function space(): BelongsTo
+    {
+        return $this->belongsTo(Space::class);
     }
 
     public function auditLogs(): HasMany

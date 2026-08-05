@@ -9,13 +9,43 @@ use App\Models\EntityObjectField;
 use App\Models\AuditLog;
 use App\Http\Requests\EntityStoreRequest;
 use App\Models\CreditBatch;
+use App\Models\HeatmapCell;
 use App\Models\Organization;
+use App\Models\Space;
+use App\Models\SpaceMember;
 use App\Models\TenantTermAcceptance;
+use App\Policies\SpacePolicy;
 use App\Services\PiiDetector;
 use App\Services\QrCodeService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
+/**
+ * EntityController — CRUD de entidades (QR Codes).
+ *
+ * ALTERAÇÃO DESTA VERSÃO (Fase 0, entrega 0.5 do PLANO_TRILHAS_2026-08.md):
+ * o controller passa a entender ESPAÇOS (`spaces`), mantendo organização
+ * como caminho válido durante toda a transição.
+ *
+ * ESTRATÉGIA DE TRANSIÇÃO — ler antes de mexer:
+ * Este é o caminho crítico do produto em produção. Portanto:
+ *
+ *   1. `space_id` é ACEITO, não exigido. Quem mandar `organization_id`
+ *      (todos os frontends de hoje) continua funcionando igual.
+ *   2. A listagem consulta por espaço quando ele é conhecido, e cai para
+ *      organização quando não é. Entidade que o backfill ainda não ligou
+ *      não some da tela.
+ *   3. Toda leitura de `spaces` está protegida por try/catch: se a
+ *      migration 2026_08_06_000001 ainda não tiver sido aplicada no
+ *      servidor, o controller opera exatamente como a versão anterior.
+ *      Ordem de deploy errada não derruba o painel.
+ *   4. A verificação de acesso soma os dois mundos: pertencer à
+ *      organização OU ser membro do espaço.
+ *
+ * Quando o backfill estiver validado e os frontends mandarem `space_id`,
+ * o fallback por organização pode ser removido numa entrega própria.
+ */
 class EntityController extends Controller
 {
     public function __construct(private QrCodeService $qrCode)
@@ -25,30 +55,48 @@ class EntityController extends Controller
     public function index(Request $request)
     {
         $tenant = $request->tenant;
-        
+
         // Recebe do Front-end qual o contexto organizacional ativo
         // Se não mandar, pega a primeira organização que o usuário é membro
-        $orgId = $request->input('organization_id') 
+        $orgId = $request->input('organization_id')
             ?? $tenant->organizations()->first()->id ?? null;
 
-        if (!$orgId) {
+        // Contexto novo: espaço. Resolvido a partir do space_id enviado ou,
+        // na falta dele, do espaço vinculado à organização ativa.
+        $space = $this->resolveSpace($request, $orgId);
+
+        if (!$orgId && !$space) {
              return response()->json(['error' => 'Nenhuma organização vinculada.'], 403);
         }
 
-        // Soma lotes da Organização
-        $activeQuota = CreditBatch::where('organization_id', $orgId)
-            ->where('status', 'active')
-            ->where(function($query) {
-                $query->whereNull('expires_at')->orWhere('expires_at', '>', now());
-            })
-            ->sum('amount_available');
+        // Soma lotes da Organização.
+        // Créditos continuam pendurados na organização nesta fase — mover
+        // para o espaço é entrega posterior, e misturar as duas coisas
+        // agora arriscaria a cota de quem está em produção.
+        $activeQuota = $orgId
+            ? CreditBatch::where('organization_id', $orgId)
+                ->where('status', 'active')
+                ->where(function($query) {
+                    $query->whereNull('expires_at')->orWhere('expires_at', '>', now());
+                })
+                ->sum('amount_available')
+            : 0;
 
-        // Pega as entidades da Organização
+        // Pega as entidades do contexto ativo.
+        // Com espaço conhecido, busca por espaço E pela organização, para
+        // não esconder entidade que o backfill ainda não ligou.
         $entities = Entity::with(['petFields', 'vaccinations', 'objectFields'])
-            ->where('organization_id', $orgId)
+            ->where(function ($query) use ($orgId, $space) {
+                if ($space) {
+                    $query->orWhere('space_id', $space->id);
+                }
+                if ($orgId) {
+                    $query->orWhere('organization_id', $orgId);
+                }
+            })
             ->orderBy('id', 'desc')
             ->get();
-        
+
         $userOrgs = $tenant->organizations()->get()->map(function($o) {
             return ['id' => $o->id, 'name' => $o->name];
         });
@@ -58,6 +106,11 @@ class EntityController extends Controller
             'quota' => $activeQuota,
             'organizations' => $userOrgs,
             'active_org_id' => $orgId,
+            // Contexto de espaço. O frontend antigo simplesmente ignora
+            // estes campos; o novo usa para o seletor de espaço (0.6).
+            'spaces' => $this->spacesOf($tenant),
+            'active_space_id' => $space?->id,
+            'active_space_type' => $space?->type,
             'entities' => $entities->map(function($e) {
                 return [
                     'unique_code' => $e->unique_code,
@@ -81,20 +134,32 @@ class EntityController extends Controller
 
     public function store(EntityStoreRequest $request)
     {
-        $tenant = $request->tenant; 
+        $tenant = $request->tenant;
 
-        $orgId = $request->input('organization_id') 
+        $orgId = $request->input('organization_id')
             ?? $tenant->organizations()->first()->id ?? null;
 
         if (!$orgId) {
              return response()->json(['error' => 'Nenhuma organização vinculada.'], 403);
         }
 
-        // Validação US1.1: O bloqueio de acesso (profile_status) 
+        $space = $this->resolveSpace($request, $orgId);
+
+        // Permissão de espaço: quando o espaço existe, quem cria precisa ter
+        // `entity.create` nele (T1-R04, delegação). Sem espaço, vale a regra
+        // antiga — que continua abaixo, intacta.
+        if ($space && !app(SpacePolicy::class)->check($tenant, $space, 'entity.create')) {
+            return response()->json([
+                'error' => 'Você não tem permissão para criar registros neste espaço.',
+                'code' => 'SPACE_PERMISSION_DENIED',
+            ], 403);
+        }
+
+        // Validação US1.1: O bloqueio de acesso (profile_status)
         // verifica a integridade dos dados fiscais do responsável financeiro da Matriz.
         $organization = Organization::find($orgId);
         $owner = $organization->owner;
-        
+
         if (!$owner || $owner->profile_status !== 'active') {
             return response()->json([
                 'error' => 'O cadastro do responsável financeiro do grupo está pendente.',
@@ -155,6 +220,9 @@ class EntityController extends Controller
 
         $entity = Entity::create([
             'organization_id' => $orgId,
+            // Nulo quando ainda não há espaço (migration não aplicada).
+            // O backfill preenche depois; nada quebra no intervalo.
+            'space_id' => $space?->id,
             'credit_batch_id' => $validBatch->id,
             'unique_code' => $uniqueCode,
             'type' => $request->type,
@@ -278,6 +346,7 @@ class EntityController extends Controller
         return response()->json([
             'message' => 'Entidade registrada com sucesso.',
             'unique_code' => $uniqueCode,
+            'space_id' => $space?->id,
             'url' => $this->qrCode->urlFor($uniqueCode),
             // SVG pronto para <img src="...">. Null só se a lib não estiver instalada.
             'qr_code_base64' => $this->qrCode->dataUriFor($uniqueCode),
@@ -289,8 +358,9 @@ class EntityController extends Controller
      * QR Code de uma entidade, para os frontends whitelabel.
      *
      * Rota autenticada: só quem pertence à organização dona da entidade
-     * consegue baixar. O código público em si já é acessível por quem tem o
-     * link, mas não faz sentido expor um gerador aberto.
+     * (ou é membro do espaço dela) consegue baixar. O código público em si
+     * já é acessível por quem tem o link, mas não faz sentido expor um
+     * gerador aberto.
      *
      * Formatos: ?format=svg (imagem crua, ideal para <img> e impressão)
      *           ?format=json (padrão — data URI + URL, ideal para SPA)
@@ -305,9 +375,7 @@ class EntityController extends Controller
             return response()->json(['error' => 'Registro não encontrado.'], 404);
         }
 
-        $orgIds = $tenant->organizations()->pluck('organizations.id')->all();
-
-        if (!in_array($entity->organization_id, $orgIds)) {
+        if (!$this->canAccessEntity($tenant, $entity)) {
             return response()->json(['error' => 'Acesso negado.'], 403);
         }
 
@@ -354,9 +422,7 @@ class EntityController extends Controller
             return response()->json(['error' => 'Registro não encontrado.'], 404);
         }
 
-        $orgIds = $tenant->organizations()->pluck('organizations.id')->all();
-
-        if (!in_array($entity->organization_id, $orgIds)) {
+        if (!$this->canAccessEntity($tenant, $entity)) {
             return response()->json(['error' => 'Acesso negado.'], 403);
         }
 
@@ -402,8 +468,12 @@ class EntityController extends Controller
             'ip_address' => $request->ip(),
             'user_agent' => $request->userAgent(),
             'accessed_at' => now(),
-            'location_data' => $request->input('location'), 
+            'location_data' => $request->input('location'),
         ]);
+
+        // Mapa de calor (Fase 6, T2-R07): agrega a leitura por célula
+        // geográfica quando o navegador informou a posição.
+        $this->recordHeatmap($request, $entity);
 
         // Fix 10: Endpoint público — NÃO expor contact_phone, contact_email, medical_info
         return response()->json([
@@ -415,7 +485,196 @@ class EntityController extends Controller
             'pet_info' => $entity->type === 'pet' ? $this->publicPetInfo($entity) : null,
             'object_info' => $entity->type === 'object' ? $this->publicObjectInfo($entity) : null,
             'organization' => $entity->organization ? $entity->organization->name : 'Organização Desconhecida',
+            // White-label e patrocínio (Fase 5, T3-R02/T3-R03).
+            'branding' => $this->branding($entity),
         ]);
+    }
+
+    /**
+     * Registra a leitura no mapa de calor (T2-R07).
+     *
+     * Aceita a localização em dois formatos, porque o frontend antigo manda
+     * `location` como string e o novo manda latitude/longitude separados —
+     * e reescrever o cliente antigo só por isso não se justifica.
+     *
+     * Envolvido em try/catch: mapa de calor é agregado estatístico. A
+     * página pública de um QR de emergência não pode falhar porque a tabela
+     * `heatmap_cells` ainda não existe no servidor.
+     */
+    private function recordHeatmap(Request $request, Entity $entity): void
+    {
+        try {
+            $latitude  = $request->input('latitude');
+            $longitude = $request->input('longitude');
+
+            // Formato antigo: "-30.0277,-51.2287" no campo `location`.
+            if ($latitude === null && $location = $request->input('location')) {
+                $parts = explode(',', (string) $location);
+
+                if (count($parts) === 2) {
+                    $latitude  = trim($parts[0]);
+                    $longitude = trim($parts[1]);
+                }
+            }
+
+            if (!is_numeric($latitude) || !is_numeric($longitude)) {
+                return;
+            }
+
+            HeatmapCell::record((float) $latitude, (float) $longitude, $entity->type);
+        } catch (\Throwable $e) {
+            Log::warning('EntityController: falha ao registrar mapa de calor', [
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Marca exibida na página pública (T3-R02, T3-R03).
+     *
+     * Duas origens, nesta ordem de precedência:
+     *   1. o LOTE que originou o QR, quando foi patrocinado — é o modelo da
+     *      farmácia que banca o código e leva a sua promoção na URL;
+     *   2. as configurações do espaço, quando o próprio parceiro é o dono.
+     *
+     * O patrocínio vem primeiro porque é ele que foi pago para aparecer.
+     *
+     * Devolve null quando não há marca: a página então usa a identidade
+     * padrão do QR do Bem, sem campo vazio na interface.
+     */
+    private function branding(Entity $entity): ?array
+    {
+        try {
+            // 1. Patrocínio do lote de crédito.
+            if ($entity->credit_batch_id) {
+                $batch = CreditBatch::find($entity->credit_batch_id);
+
+                if ($batch && $batch->sponsor_space_id) {
+                    $sponsor = Space::find($batch->sponsor_space_id);
+
+                    if ($sponsor) {
+                        return [
+                            'source'         => 'sponsor',
+                            'name'           => $sponsor->name,
+                            'logo_url'       => $sponsor->setting('branding.logo_url'),
+                            'primary_color'  => $sponsor->setting('branding.primary_color'),
+                            'sponsor_url'    => $batch->sponsor_url,
+                            'sponsor_label'  => $sponsor->setting('branding.sponsor_label', 'Oferecido por'),
+                        ];
+                    }
+                }
+            }
+
+            // 2. Marca do próprio espaço.
+            if ($entity->space_id) {
+                $space = Space::find($entity->space_id);
+                $logo = $space?->setting('branding.logo_url');
+
+                if ($logo) {
+                    return [
+                        'source'        => 'space',
+                        'name'          => $space->name,
+                        'logo_url'      => $logo,
+                        'primary_color' => $space->setting('branding.primary_color'),
+                    ];
+                }
+            }
+
+            return null;
+        } catch (\Throwable $e) {
+            // Marca é enfeite; página de emergência não pode cair por causa
+            // de uma coluna de patrocínio que ainda não existe no servidor.
+            return null;
+        }
+    }
+
+    /**
+     * Resolve o espaço ativo da requisição.
+     *
+     * Ordem: `space_id` explícito → espaço da organização ativa → null.
+     *
+     * O try/catch existe para o intervalo entre subir este arquivo e rodar
+     * a migration de `spaces` no servidor: sem tabela, o controller volta a
+     * se comportar exatamente como a versão anterior, em vez de derrubar o
+     * painel com erro de SQL.
+     */
+    private function resolveSpace(Request $request, ?int $orgId): ?Space
+    {
+        try {
+            $spaceId = $request->input('space_id');
+
+            if ($spaceId) {
+                return Space::find($spaceId);
+            }
+
+            if ($orgId) {
+                return Space::where('organization_id', $orgId)->first();
+            }
+
+            return null;
+        } catch (\Throwable $e) {
+            Log::warning('EntityController: spaces indisponível, usando organização', [
+                'error' => $e->getMessage(),
+            ]);
+            return null;
+        }
+    }
+
+    /**
+     * Espaços a que esta conta tem acesso — como dona ou como membro.
+     * Alimenta o seletor de espaço do painel (entrega 0.6).
+     */
+    private function spacesOf($tenant): array
+    {
+        try {
+            $memberSpaceIds = SpaceMember::where('tenant_id', $tenant->id)
+                ->whereNotNull('accepted_at')
+                ->pluck('space_id');
+
+            return Space::where('owner_tenant_id', $tenant->id)
+                ->orWhereIn('id', $memberSpaceIds)
+                ->orderBy('id')
+                ->get()
+                ->map(fn (Space $s) => [
+                    'id' => $s->id,
+                    'name' => $s->name,
+                    'type' => $s->type,
+                    'slug' => $s->slug,
+                ])
+                ->values()
+                ->all();
+        } catch (\Throwable $e) {
+            // Mesma proteção do resolveSpace: sem tabela, lista vazia.
+            return [];
+        }
+    }
+
+    /**
+     * Acesso à entidade: pela organização (regra atual) OU pelo espaço
+     * (regra nova). Basta um dos dois — é o que mantém em pé tanto a
+     * entidade já migrada quanto a que o backfill ainda não tocou.
+     */
+    private function canAccessEntity($tenant, Entity $entity): bool
+    {
+        $orgIds = $tenant->organizations()->pluck('organizations.id')->all();
+
+        if (in_array($entity->organization_id, $orgIds)) {
+            return true;
+        }
+
+        if (!$entity->space_id) {
+            return false;
+        }
+
+        try {
+            $space = Space::find($entity->space_id);
+
+            return $space
+                ? app(SpacePolicy::class)->check($tenant, $space, 'entity.view')
+                : false;
+        } catch (\Throwable $e) {
+            return false;
+        }
     }
 
     /**

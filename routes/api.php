@@ -4,7 +4,24 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\EntityController;
 use App\Http\Controllers\AdminController;
 use App\Http\Controllers\ConversationController;
+use App\Http\Controllers\Api\V1\PartnerController;
+use App\Http\Controllers\ApiKeyController;
+use App\Http\Controllers\BeneficiaryController;
+use App\Http\Controllers\ConfirmationController;
+use App\Http\Controllers\CauseController;
+use App\Http\Controllers\DisbursementController;
+use App\Http\Controllers\DonationController;
 use App\Http\Controllers\EmergencyController;
+use App\Http\Controllers\FamilyController;
+use App\Http\Controllers\HealthController;
+use App\Http\Controllers\HeatmapController;
+use App\Http\Controllers\SponsorshipController;
+use App\Http\Controllers\MediaController;
+use App\Http\Controllers\QrBatchController;
+use App\Http\Controllers\SpaceController;
+use App\Http\Controllers\MeController;
+use App\Http\Controllers\PanicController;
+use App\Http\Controllers\TwoFactorController;
 use App\Http\Controllers\MessageController;
 use App\Http\Controllers\OtpController;
 use App\Http\Controllers\ProfileController;
@@ -18,7 +35,7 @@ use App\Http\Controllers\WebhookController;
 Route::middleware('throttle:otp')->group(function () {
     Route::post('/auth/send-otp', [OtpController::class, 'sendOtp']);
     Route::post('/auth/verify-otp', [OtpController::class, 'verifyOtp']);
-    
+
     Route::post('/auth/register-link', [\App\Http\Controllers\RegisterController::class, 'sendLink']);
     Route::get('/auth/register-validate', [\App\Http\Controllers\RegisterController::class, 'validateToken']);
 });
@@ -45,6 +62,102 @@ Route::middleware('auth.firebase')->group(function () {
     Route::get('/profile', [ProfileController::class, 'show']);
     Route::put('/profile', [ProfileController::class, 'update']);
     Route::post('/profile/documents', [ProfileController::class, 'addDocument']);
+
+    // Identidade da pessoa: contas múltiplas e vínculos (Fase 0, F10).
+    // Requisitos TX-R02, TX-R03 e TX-R04 do PLANO_TRILHAS_2026-08.md.
+    //
+    // Nenhuma destas rotas aceita CPF vindo do cliente: todas partem do
+    // tenant autenticado pelo JWT. CPF não é segredo e não pode ser
+    // credencial de leitura de vínculo. Ver MeController.
+    Route::get('/me/accounts', [MeController::class, 'accounts']);
+    Route::get('/me/links', [MeController::class, 'links']);
+    Route::post('/me/switch-account', [MeController::class, 'switchAccount']);
+
+    // --- Módulo Premium de Saúde (Fase 6, T1-R08 a T1-R11) ---
+    Route::get('/entities/{unique_code}/health', [HealthController::class, 'show']);
+    Route::post('/entities/{unique_code}/health/diary', [HealthController::class, 'storeDiaryEntry']);
+    Route::post('/entities/{unique_code}/prescriptions', [HealthController::class, 'storePrescription']);
+    Route::put('/prescriptions/{prescription}', [HealthController::class, 'updatePrescription']);
+    // Exporta para a agenda nativa de Android e iOS (T1-R11).
+    Route::get('/prescriptions/{prescription}/calendar.ics', [HealthController::class, 'calendar']);
+
+    // Código de barras → produto, com confirmação do usuário (T1-R09).
+    Route::post('/medications/lookup', [HealthController::class, 'lookupMedication']);
+    Route::post('/medications/{medication}/confirm', [HealthController::class, 'confirmMedication']);
+
+    // --- Apadrinhamento digital (Fase 6, T2-R06) ---
+    Route::post('/b/{unique_code}/sponsor', [SponsorshipController::class, 'store']);
+    Route::get('/sponsorships/mine', [SponsorshipController::class, 'mine']);
+    Route::post('/sponsorships/{sponsorship}/end', [SponsorshipController::class, 'end']);
+
+    // --- Empresas: chaves de API e motor de confirmação (Fase 5) ---
+    Route::get('/spaces/{space}/api-keys', [ApiKeyController::class, 'index']);
+    Route::post('/spaces/{space}/api-keys', [ApiKeyController::class, 'store']);
+    Route::delete('/api-keys/{key}', [ApiKeyController::class, 'revoke']);
+
+    Route::get('/spaces/{space}/confirmation-templates', [ConfirmationController::class, 'templates']);
+    Route::post('/spaces/{space}/confirmation-templates', [ConfirmationController::class, 'storeTemplate']);
+    Route::post('/spaces/{space}/confirmation-actors', [ConfirmationController::class, 'storeActor']);
+    Route::post('/spaces/{space}/confirmation-actors/{actor}/password', [ConfirmationController::class, 'setActorPassword']);
+    Route::get('/spaces/{space}/confirmations', [ConfirmationController::class, 'index']);
+
+    // --- Doações (Fase 4, T4-R01 a T4-R04) ---
+    Route::post('/donations', [DonationController::class, 'store']);
+    Route::get('/donations/mine', [DonationController::class, 'mine']);
+    Route::post('/donations/subscribe', [DonationController::class, 'subscribe']);
+    Route::post('/donations/{subscription}/cancel-subscription', [DonationController::class, 'cancelSubscription']);
+
+    // --- Beneficiários (Fase 4, T4-R05, T4-R09) ---
+    Route::post('/spaces/{space}/beneficiaries', [BeneficiaryController::class, 'store']);
+    Route::get('/spaces/{space}/beneficiaries', [BeneficiaryController::class, 'index']);
+    Route::put('/beneficiaries/{beneficiary}', [BeneficiaryController::class, 'update']);
+    Route::post('/beneficiaries/{beneficiary}/proof-password', [BeneficiaryController::class, 'setProofPassword']);
+
+    // --- Repasses (Fase 4, T4-R03, T4-R06, T4-R08) ---
+    Route::post('/spaces/{space}/disbursements', [DisbursementController::class, 'store']);
+    Route::get('/spaces/{space}/disbursements', [DisbursementController::class, 'index']);
+    Route::post('/disbursements/{disbursement}/transition', [DisbursementController::class, 'transition']);
+    Route::post('/disbursements/{disbursement}/reimbursement', [DisbursementController::class, 'authorizeReimbursement']);
+
+    // Espaços de trilha (F1) e guarda-chuva (Fase 3, T2-R01, T2-R02).
+    Route::get('/spaces', [SpaceController::class, 'index']);
+    Route::post('/spaces', [SpaceController::class, 'store']);
+    Route::get('/spaces/{space}', [SpaceController::class, 'show']);
+    Route::put('/spaces/{space}', [SpaceController::class, 'update']);
+    Route::post('/spaces/{space}/children', [SpaceController::class, 'attachChild']);
+
+    // Vitrine da causa (Fase 3, T2-R04, T2-R05).
+    Route::put('/spaces/{space}/cause', [CauseController::class, 'update']);
+    Route::post('/spaces/{space}/cause/publish', [CauseController::class, 'publish']);
+
+    // Mídia com moderação (Fase 3, T2-R05).
+    Route::post('/spaces/{space}/media', [MediaController::class, 'store']);
+    Route::get('/spaces/{space}/media', [MediaController::class, 'index']);
+    Route::post('/media/{media}/moderate', [MediaController::class, 'moderate']);
+    Route::delete('/media/{media}', [MediaController::class, 'destroy']);
+
+    // QR Codes em lote e folha de impressão (Fase 3, T2-R03).
+    Route::post('/spaces/{space}/qr-batches', [QrBatchController::class, 'store']);
+    Route::get('/spaces/{space}/qr-batches', [QrBatchController::class, 'index']);
+    Route::get('/qr-batches/{batch}', [QrBatchController::class, 'show']);
+    Route::get('/qr-batches/{batch}/print', [QrBatchController::class, 'print']);
+
+    // Árvore genealógica do espaço familiar (Fase 1, T1-R02).
+    Route::get('/spaces/{space}/family', [FamilyController::class, 'index']);
+    Route::post('/spaces/{space}/family', [FamilyController::class, 'store']);
+    Route::delete('/spaces/{space}/family/{relationship}', [FamilyController::class, 'destroy']);
+
+    // Botão de Pânico (T1-R07) — versão rústica, alarme no app + e-mail.
+    Route::post('/spaces/{space}/panic', [PanicController::class, 'trigger']);
+    Route::get('/spaces/{space}/panic', [PanicController::class, 'index']);
+    Route::post('/panic/{event}/resolve', [PanicController::class, 'resolve']);
+
+    // 2FA opcional por aplicativo autenticador (Fase 1, T1-R05).
+    Route::get('/2fa/status', [TwoFactorController::class, 'status']);
+    Route::post('/2fa/setup', [TwoFactorController::class, 'setup']);
+    Route::post('/2fa/confirm', [TwoFactorController::class, 'confirm']);
+    Route::post('/2fa/verify', [TwoFactorController::class, 'verify']);
+    Route::post('/2fa/disable', [TwoFactorController::class, 'disable']);
 
     Route::get('/entities', [EntityController::class, 'index']);
     Route::post('/entities', [EntityController::class, 'store']);
@@ -78,6 +191,74 @@ Route::middleware('auth.firebase')->group(function () {
     Route::put('/admin/credits/pricing', [AdminController::class, 'updatePricing']);
 });
 
+// --- Mapa de calor público (Fase 6, T2-R07) ---
+// Sem autenticação: o mapa é material de campanha e existe para ser visto
+// por quem ainda não é usuário. Agregado por célula de ~1,1 km.
+Route::get('/heatmap', [HeatmapController::class, 'index']);
+Route::get('/heatmap/summary', [HeatmapController::class, 'summary']);
+
+// --- API PÚBLICA DE PARCEIROS — /api/v1 (Fase 5, T3-R01) ---
+//
+// Autenticação por chave (X-Api-Key + X-Api-Secret), escopo declarado em
+// cada rota e rate limit por parceiro. O parceiro só enxerga o próprio
+// espaço: nenhum endpoint aceita `space_id` do cliente.
+//
+// O caminho é versionado de propósito. Quando houver v2, as duas convivem:
+// parceiro corporativo não atualiza integração no nosso ritmo.
+Route::prefix('v1')->group(function () {
+    Route::middleware('api.key:entities.read')->group(function () {
+        Route::get('/entities', [PartnerController::class, 'listEntities']);
+        Route::get('/entities/{code}', [PartnerController::class, 'showEntity']);
+    });
+
+    Route::middleware('api.key:entities.write')->group(function () {
+        Route::post('/entities', [PartnerController::class, 'createEntity']);
+    });
+
+    Route::middleware('api.key:confirmations.read')->group(function () {
+        Route::get('/confirmations', [PartnerController::class, 'listConfirmations']);
+    });
+
+    Route::middleware('api.key:confirmations.write')->group(function () {
+        Route::post('/confirmations', [PartnerController::class, 'storeConfirmation']);
+    });
+});
+
+// Confirmação por leitura do QR (Fase 5, T3-R05/R06/R07).
+// Pública com throttle: quem confirma é o funcionário no chão de fábrica
+// ou o porteiro na guarita, sem conta no sistema. A prova vem da senha do
+// confirmador — o segundo fator que o requisito de EPI exige.
+Route::post('/entities/{unique_code}/confirm', [ConfirmationController::class, 'confirm'])
+    ->middleware('throttle:public-messages');
+
+// --- URL única do beneficiário (Fase 4, T4-R05, T4-R06, T4-R07) ---
+//
+// Públicas por definição: o beneficiário não tem conta no sistema. A
+// credencial é a combinação do código único (que só ele tem) com o fator
+// de contraprova (que só ele ou o tutor sabem), mais o throttle.
+//
+// A confirmação por tutor exige tutor autenticado — o controller verifica,
+// e a rota aceita o token opcionalmente por `?id_token=` do FirebaseAuth.
+Route::middleware(['throttle:public-messages', 'auth.firebase.optional'])->group(function () {
+    Route::get('/b/{unique_code}', [BeneficiaryController::class, 'publicShow']);
+    Route::post('/b/{unique_code}/needs', [BeneficiaryController::class, 'storeNeed']);
+    Route::post('/b/{unique_code}/disbursements/{disbursement}/confirm', [DisbursementController::class, 'confirm']);
+    Route::post('/b/{unique_code}/disbursements/{disbursement}/proof', [DisbursementController::class, 'storeProof']);
+});
+
+// Últimas doações de uma causa — prova social do lado do dinheiro.
+Route::get('/causes/{slug}/donations', [DonationController::class, 'publicList']);
+
+// --- Vitrine pública das causas (Fase 3, T2-R04) ---
+// Sem autenticação: a vitrine existe para ser vista por quem ainda não é
+// usuário. Só causa publicada aparece.
+Route::get('/causes', [CauseController::class, 'index']);
+Route::get('/causes/{slug}', [CauseController::class, 'show']);
+
+// Entrega de mídia. Rota pública, mas só serve arquivo APROVADO — é essa
+// verificação que torna seguro guardar aprovada e reprovada no mesmo lugar.
+Route::get('/media/{media}', [MediaController::class, 'serve']);
+
 // --- Rotas públicas de entidades ---
 Route::get('/entities/{unique_code}', [EntityController::class, 'show']);
 Route::post('/entities/{unique_code}/messages', [MessageController::class, 'storePublic'])->middleware('throttle:public-messages');
@@ -91,6 +272,12 @@ Route::middleware('throttle:public-messages')->group(function () {
 
 Route::post('/entities/{unique_code}/conversations/recover', [ConversationController::class, 'recover'])
     ->middleware('throttle:conversation-recovery');
+
+// Botão de Pânico por leitura de QR (público).
+// Sem autenticação por definição: quem encontrou a pessoa na rua não tem
+// conta. Throttle aplicado para conter acionamento em massa.
+Route::post('/entities/{unique_code}/panic', [PanicController::class, 'triggerPublic'])
+    ->middleware('throttle:public-messages');
 
 // Declaração de emergência (pública)
 Route::post('/entities/{unique_code}/declare-emergency', [EmergencyController::class, 'declare'])

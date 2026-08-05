@@ -96,6 +96,19 @@ class WebhookController extends Controller
             return;
         }
 
+        // A partir da Fase 4 o mesmo webhook atende dois fluxos distintos:
+        // compra de créditos e DOAÇÃO. O prefixo do external_reference é o
+        // que separa um do outro — `donation-<id>` é criado em
+        // MercadoPagoService::createDonationPreference().
+        //
+        // Distinguir pelo prefixo, e não por consulta ao banco, evita que
+        // uma doação seja procurada na tabela de pedidos de crédito (e
+        // registrada como "não encontrada") a cada notificação.
+        if (str_starts_with($externalReference, 'donation-')) {
+            $this->processDonation($externalReference, $payment, $dataId);
+            return;
+        }
+
         $order = CreditOrder::where('external_reference', $externalReference)->first();
 
         if (!$order) {
@@ -126,5 +139,59 @@ class WebhookController extends Controller
         }
 
         CreditController::approveOrder($order, $dataId);
+    }
+
+    /**
+     * Confirma uma DOAÇÃO e credita a causa (Fase 4, T4-R01/T4-R03).
+     *
+     * A gravação do `mp_payment_id` acontece ANTES do crédito, e a coluna é
+     * única no banco. Assim, se o Mercado Pago reenviar a notificação — o
+     * que ele faz —, a segunda tentativa esbarra na restrição e a causa não
+     * é creditada duas vezes. Idempotência garantida pelo banco, não por
+     * uma verificação que pode perder a corrida.
+     */
+    private function processDonation(string $externalReference, array $payment, string $dataId): void
+    {
+        $donationId = (int) str_replace('donation-', '', $externalReference);
+
+        $donation = \App\Models\Donation::find($donationId);
+
+        if (!$donation) {
+            Log::warning("MercadoPago Webhook: Donation not found for {$externalReference}.");
+            return;
+        }
+
+        $status = $payment['status'] ?? '';
+
+        if ($status !== 'approved') {
+            if (in_array($status, ['rejected', 'cancelled'], true)) {
+                $donation->update(['status' => 'failed', 'mp_status' => $status]);
+            }
+            return;
+        }
+
+        if ($donation->isPaid()) {
+            return;
+        }
+
+        $paymentAmount = (float) ($payment['transaction_amount'] ?? 0);
+        $expected = (float) $donation->amount;
+
+        // Divergência de valor é registrada, mas não bloqueia o crédito: o
+        // dinheiro entrou de fato, e travar o repasse por 5 centavos de
+        // arredondamento causaria mais dano do que a diferença.
+        if (abs($paymentAmount - $expected) > 0.05) {
+            Log::warning("MercadoPago Webhook: donation {$donationId} amount mismatch. Expected: {$expected}, Got: {$paymentAmount}");
+        }
+
+        try {
+            $donation->update(['mp_payment_id' => $dataId]);
+        } catch (\Throwable $e) {
+            // Violação da unicidade = notificação repetida. Já processada.
+            Log::info("MercadoPago Webhook: donation {$donationId} já processada (mp_payment_id duplicado).");
+            return;
+        }
+
+        DonationController::markAsPaid($donation, $status);
     }
 }
