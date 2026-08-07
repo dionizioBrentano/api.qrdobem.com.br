@@ -22,7 +22,17 @@ class Donation extends Model
         'donor_tenant_id',
         'donor_name',
         'donor_email',
+        'donor_document_encrypted',
+        'donor_document_hash',
+        'lgpd_consent_at',
         'amount',
+        'amount_gross',
+        'platform_fee_percent',
+        'platform_fee_amount',
+        'payment_fee_amount',
+        'amount_to_cause',
+        'cover_fees',
+        'extra_platform_support',
         'payment_method',
         'status',
         'mp_payment_id',
@@ -35,18 +45,33 @@ class Donation extends Model
     ];
 
     protected $casts = [
-        'amount'       => 'decimal:2',
-        'is_anonymous' => 'boolean',
-        'paid_at'      => 'datetime',
+        'amount'                 => 'decimal:2',
+        'amount_gross'           => 'decimal:2',
+        'platform_fee_percent'   => 'decimal:2',
+        'platform_fee_amount'    => 'decimal:2',
+        'payment_fee_amount'     => 'decimal:2',
+        'amount_to_cause'        => 'decimal:2',
+        'extra_platform_support' => 'decimal:2',
+        'cover_fees'               => 'boolean',
+        'is_anonymous'             => 'boolean',
+        'paid_at'                  => 'datetime',
+        'lgpd_consent_at'          => 'datetime',
+        // CPF do doador convidado cifrado em repouso. O cast `encrypted` não
+        // é determinístico: por isso a busca usa o blind index, nunca esta
+        // coluna. Mesmo padrão de Person::$casts.
+        'donor_document_encrypted' => 'encrypted',
     ];
 
     /**
-     * E-mail do doador nunca sai em listagem pública. A vitrine mostra
-     * quem doou (quando não é anônimo) e quanto — nunca o contato, que
-     * viraria lista de captação para terceiros.
+     * Dados que nunca saem em resposta pública. O e-mail viraria lista de
+     * captação para terceiros; o CPF (cifrado) e seu blind index não têm por
+     * que trafegar — a vitrine mostra quem doou e quanto, jamais o contato
+     * ou o documento.
      */
     protected $hidden = [
         'donor_email',
+        'donor_document_encrypted',
+        'donor_document_hash',
     ];
 
     public function cause(): BelongsTo

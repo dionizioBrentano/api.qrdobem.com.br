@@ -14,7 +14,6 @@ use App\Http\Controllers\DonationController;
 use App\Http\Controllers\EmergencyController;
 use App\Http\Controllers\FamilyController;
 use App\Http\Controllers\HealthController;
-use App\Http\Controllers\HeatmapController;
 use App\Http\Controllers\SponsorshipController;
 use App\Http\Controllers\MediaController;
 use App\Http\Controllers\QrBatchController;
@@ -102,7 +101,10 @@ Route::middleware('auth.firebase')->group(function () {
     Route::get('/spaces/{space}/confirmations', [ConfirmationController::class, 'index']);
 
     // --- Doações (Fase 4, T4-R01 a T4-R04) ---
-    Route::post('/donations', [DonationController::class, 'store']);
+    // A CRIAÇÃO de doação (POST /donations) NÃO fica aqui: doar não exige
+    // conta (guest checkout). Ela está no grupo de auth OPCIONAL, mais abaixo.
+    // O que sobra aqui é o que só faz sentido logado — as MINHAS doações e a
+    // assinatura recorrente, que pertencem a um tenant.
     Route::get('/donations/mine', [DonationController::class, 'mine']);
     Route::post('/donations/subscribe', [DonationController::class, 'subscribe']);
     Route::post('/donations/{subscription}/cancel-subscription', [DonationController::class, 'cancelSubscription']);
@@ -191,11 +193,16 @@ Route::middleware('auth.firebase')->group(function () {
     Route::put('/admin/credits/pricing', [AdminController::class, 'updatePricing']);
 });
 
-// --- Mapa de calor público (Fase 6, T2-R07) ---
-// Sem autenticação: o mapa é material de campanha e existe para ser visto
-// por quem ainda não é usuário. Agregado por célula de ~1,1 km.
-Route::get('/heatmap', [HeatmapController::class, 'index']);
-Route::get('/heatmap/summary', [HeatmapController::class, 'summary']);
+// --- Mapa de calor (Fase 6, T2-R07) — DESATIVADO em 06/08/2026 ---
+//
+// Rotas removidas por decisão do proprietário. O controller segue em
+// app/Http/Controllers/HeatmapController.php e a agregação continua sendo
+// alimentada a cada leitura de QR (EntityController::recordHeatmap), então
+// quando o mapa voltar já haverá histórico.
+//
+// Para reativar, devolver estas duas linhas:
+//   Route::get('/heatmap', [HeatmapController::class, 'index']);
+//   Route::get('/heatmap/summary', [HeatmapController::class, 'summary']);
 
 // --- API PÚBLICA DE PARCEIROS — /api/v1 (Fase 5, T3-R01) ---
 //
@@ -244,6 +251,23 @@ Route::middleware(['throttle:public-messages', 'auth.firebase.optional'])->group
     Route::post('/b/{unique_code}/needs', [BeneficiaryController::class, 'storeNeed']);
     Route::post('/b/{unique_code}/disbursements/{disbursement}/confirm', [DisbursementController::class, 'confirm']);
     Route::post('/b/{unique_code}/disbursements/{disbursement}/proof', [DisbursementController::class, 'storeProof']);
+});
+
+// --- Doação SEM login (guest checkout) — auth OPCIONAL ---
+//
+// Doar não exige conta: o doador se identifica por doação (nome, e-mail,
+// CPF). Com Bearer válido, o middleware preenche $request->tenant e a doação
+// é atribuída à conta; sem token, segue como guest. É o MESMO controller,
+// o MESMO cálculo (DonationFeeCalculator) e a MESMA persistência de rateio.
+//
+// Throttle forte por IP: a criação dispara pagamento; o preview é só cálculo,
+// sem PII, e por isso tem limite mais folgado.
+Route::middleware('auth.firebase.optional')->group(function () {
+    Route::post('/donations', [DonationController::class, 'store'])
+        ->middleware('throttle:donation-create');
+
+    Route::post('/donations/preview', [DonationController::class, 'preview'])
+        ->middleware('throttle:donation-preview');
 });
 
 // Últimas doações de uma causa — prova social do lado do dinheiro.

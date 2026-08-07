@@ -66,4 +66,29 @@ return [
 
     'onboarding_credits_days' => (int) env('QR_ONBOARDING_DAYS', 30),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Doações — taxa operacional da OSCIP/plataforma
+    |--------------------------------------------------------------------------
+    |
+    | Única modalidade fiscal ATIVA: doação com recibo emitido pela OSCIP
+    | gestora do QR do Bem. NÃO há projeto de lei de incentivo homologado
+    | (nada de PRONON/Rouanet/FIA como benefício ativo) — logo, não existe
+    | dedução de IRPF a exibir. O que existe é esta taxa.
+    |
+    | `platform_fee_percent` é a taxa operacional cobrada sobre o VALOR BRUTO
+    | da doação. Fica em config (e não hardcoded no serviço de cálculo) para
+    | que o admin possa ajustar sem tocar em código. O custo do meio de
+    | pagamento é OUTRA coisa: é custo real, à parte, discriminado por doação,
+    | e não sai daqui — ver App\Services\DonationFeeCalculator.
+    |
+    | Precisa ficar em config PHP, e não num env() dentro do serviço: com a
+    | config cacheada em produção, env() devolve null e a taxa zeraria.
+    |
+    */
+
+    'donation' => [
+        'platform_fee_percent' => (float) env('DONATION_PLATFORM_FEE_PERCENT', 12),
+    ],
+
 ];

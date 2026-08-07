@@ -41,5 +41,18 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('conversation-recovery', function (Request $request) {
             return Limit::perMinute(5)->by($request->ip());
         });
+
+        // Criação de doação (rota pública, dispara pagamento): 6/minuto por IP.
+        // É um ato deliberado — 6 tentativas por minuto sobra para o doador
+        // legítimo e corta script que tenta abrir preferências em massa.
+        RateLimiter::for('donation-create', function (Request $request) {
+            return Limit::perMinute(6)->by($request->ip());
+        });
+
+        // Preview do rateio (só cálculo, sem PII): 30/minuto por IP. Mais
+        // folgado porque o front recalcula ao digitar, mas ainda limitado.
+        RateLimiter::for('donation-preview', function (Request $request) {
+            return Limit::perMinute(30)->by($request->ip());
+        });
     }
 }
