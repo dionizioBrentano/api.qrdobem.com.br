@@ -29,8 +29,11 @@ return new class extends Migration
 {
     public function up(): void
     {
-        // --- Doações (T4-R01 a T4-R04) ---
-        Schema::create('donations', function (Blueprint $table) {
+        // --- Doações a causa / checkout (T4-R01 a T4-R04) ---
+        // Tabela `donation_causes` (não `donations`): o nome `donations` é do
+        // legado de comprovantes (DonationReceipt). Ver a migration
+        // 2026_08_07_000003_rename_or_create_donation_receipts.
+        Schema::create('donation_causes', function (Blueprint $table) {
             $table->id();
 
             // Causa escolhida pelo doador (T4-R02). Nula = doação livre,
@@ -246,6 +249,6 @@ return new class extends Migration
         Schema::dropIfExists('beneficiary_needs');
         Schema::dropIfExists('beneficiaries');
         Schema::dropIfExists('donation_subscriptions');
-        Schema::dropIfExists('donations');
+        Schema::dropIfExists('donation_causes');
     }
 };

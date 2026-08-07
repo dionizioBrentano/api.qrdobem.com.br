@@ -10,7 +10,7 @@ use App\Http\Controllers\BeneficiaryController;
 use App\Http\Controllers\ConfirmationController;
 use App\Http\Controllers\CauseController;
 use App\Http\Controllers\DisbursementController;
-use App\Http\Controllers\DonationController;
+use App\Http\Controllers\DonationCauseController;
 use App\Http\Controllers\EmergencyController;
 use App\Http\Controllers\FamilyController;
 use App\Http\Controllers\HealthController;
@@ -100,14 +100,15 @@ Route::middleware('auth.firebase')->group(function () {
     Route::post('/spaces/{space}/confirmation-actors/{actor}/password', [ConfirmationController::class, 'setActorPassword']);
     Route::get('/spaces/{space}/confirmations', [ConfirmationController::class, 'index']);
 
-    // --- Doações (Fase 4, T4-R01 a T4-R04) ---
-    // A CRIAÇÃO de doação (POST /donations) NÃO fica aqui: doar não exige
-    // conta (guest checkout). Ela está no grupo de auth OPCIONAL, mais abaixo.
-    // O que sobra aqui é o que só faz sentido logado — as MINHAS doações e a
-    // assinatura recorrente, que pertencem a um tenant.
-    Route::get('/donations/mine', [DonationController::class, 'mine']);
-    Route::post('/donations/subscribe', [DonationController::class, 'subscribe']);
-    Route::post('/donations/{subscription}/cancel-subscription', [DonationController::class, 'cancelSubscription']);
+    // --- Doações a causa / checkout (Fase 4, T4-R01 a T4-R04) ---
+    // Bounded context DonationCause (tabela donation_causes). A CRIAÇÃO
+    // (POST /donation-causes) NÃO fica aqui: doar não exige conta (guest
+    // checkout) — está no grupo de auth OPCIONAL, mais abaixo. O que sobra
+    // aqui é o que só faz sentido logado: as MINHAS doações e a assinatura
+    // recorrente, que pertencem a um tenant.
+    Route::get('/donation-causes/mine', [DonationCauseController::class, 'mine']);
+    Route::post('/donation-causes/subscribe', [DonationCauseController::class, 'subscribe']);
+    Route::post('/donation-causes/{subscription}/cancel-subscription', [DonationCauseController::class, 'cancelSubscription']);
 
     // --- Beneficiários (Fase 4, T4-R05, T4-R09) ---
     Route::post('/spaces/{space}/beneficiaries', [BeneficiaryController::class, 'store']);
@@ -253,25 +254,27 @@ Route::middleware(['throttle:public-messages', 'auth.firebase.optional'])->group
     Route::post('/b/{unique_code}/disbursements/{disbursement}/proof', [DisbursementController::class, 'storeProof']);
 });
 
-// --- Doação SEM login (guest checkout) — auth OPCIONAL ---
+// --- Doação a causa SEM login (guest checkout) — auth OPCIONAL ---
 //
 // Doar não exige conta: o doador se identifica por doação (nome, e-mail,
 // CPF). Com Bearer válido, o middleware preenche $request->tenant e a doação
 // é atribuída à conta; sem token, segue como guest. É o MESMO controller,
-// o MESMO cálculo (DonationFeeCalculator) e a MESMA persistência de rateio.
+// o MESMO cálculo (DonationFeeCalculator) e a MESMA persistência de rateio
+// em donation_causes.
 //
 // Throttle forte por IP: a criação dispara pagamento; o preview é só cálculo,
 // sem PII, e por isso tem limite mais folgado.
 Route::middleware('auth.firebase.optional')->group(function () {
-    Route::post('/donations', [DonationController::class, 'store'])
+    Route::post('/donation-causes', [DonationCauseController::class, 'store'])
         ->middleware('throttle:donation-create');
 
-    Route::post('/donations/preview', [DonationController::class, 'preview'])
+    Route::post('/donation-causes/preview', [DonationCauseController::class, 'preview'])
         ->middleware('throttle:donation-preview');
 });
 
-// Últimas doações de uma causa — prova social do lado do dinheiro.
-Route::get('/causes/{slug}/donations', [DonationController::class, 'publicList']);
+// Últimas doações de uma causa — prova social do lado do dinheiro. Path
+// cause-scoped mantido (é leitura pública sob a causa, não checkout).
+Route::get('/causes/{slug}/donations', [DonationCauseController::class, 'publicList']);
 
 // --- Vitrine pública das causas (Fase 3, T2-R04) ---
 // Sem autenticação: a vitrine existe para ser vista por quem ainda não é

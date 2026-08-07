@@ -259,7 +259,7 @@ class MercadoPagoService
      * O `external_reference` leva o prefixo `donation-` justamente para que
      * a conciliação bancária distinga um do outro sem consultar o banco.
      */
-    public function createDonationPreference(\App\Models\Donation $donation): ?array
+    public function createDonationPreference(\App\Models\DonationCause $donation): ?array
     {
         $token = $this->getAccessToken();
         $frontendUrl = rtrim(config('mercadopago.frontend_url'), '/');

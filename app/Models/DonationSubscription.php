@@ -44,7 +44,7 @@ class DonationSubscription extends Model
 
     public function donations(): HasMany
     {
-        return $this->hasMany(Donation::class, 'subscription_id');
+        return $this->hasMany(DonationCause::class, 'subscription_id');
     }
 
     public function isActive(): bool

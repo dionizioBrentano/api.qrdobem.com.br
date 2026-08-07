@@ -154,7 +154,7 @@ class WebhookController extends Controller
     {
         $donationId = (int) str_replace('donation-', '', $externalReference);
 
-        $donation = \App\Models\Donation::find($donationId);
+        $donation = \App\Models\DonationCause::find($donationId);
 
         if (!$donation) {
             Log::warning("MercadoPago Webhook: Donation not found for {$externalReference}.");
@@ -192,6 +192,6 @@ class WebhookController extends Controller
             return;
         }
 
-        DonationController::markAsPaid($donation, $status);
+        DonationCauseController::markAsPaid($donation, $status);
     }
 }

@@ -34,7 +34,7 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::table('donations', function (Blueprint $table) {
+        Schema::table('donation_causes', function (Blueprint $table) {
             $table->decimal('amount_gross', 12, 2)->nullable()->after('amount');
             $table->decimal('platform_fee_percent', 5, 2)->nullable()->after('amount_gross');
             $table->decimal('platform_fee_amount', 12, 2)->default(0)->after('platform_fee_percent');
@@ -47,7 +47,7 @@ return new class extends Migration
 
     public function down(): void
     {
-        Schema::table('donations', function (Blueprint $table) {
+        Schema::table('donation_causes', function (Blueprint $table) {
             $table->dropColumn([
                 'amount_gross',
                 'platform_fee_percent',

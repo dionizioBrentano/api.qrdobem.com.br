@@ -7,9 +7,10 @@ use Illuminate\Support\Facades\Schema;
 /**
  * Fase 4 — doação SEM login (guest checkout).
  *
- * Doar não exige conta: o doador se identifica por doação. `donor_name` e
- * `donor_email` já existem na tabela e servem ao recibo e à conciliação.
- * Falta o documento e o consentimento — acrescentados aqui.
+ * Altera a tabela do checkout, `donation_causes` (antes `donations`, antes da
+ * separação dos agregados). Doar não exige conta: o doador se identifica por
+ * doação. `donor_name` e `donor_email` já existem na tabela e servem ao
+ * recibo e à conciliação. Falta o documento e o consentimento — aqui.
  *
  * SEGURANÇA DO CPF (mesmo padrão de Person / CpfIdentityService)
  *   donor_document_encrypted  CPF cifrado em repouso (cast `encrypted` no
@@ -31,7 +32,7 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::table('donations', function (Blueprint $table) {
+        Schema::table('donation_causes', function (Blueprint $table) {
             $table->text('donor_document_encrypted')->nullable()->after('donor_email');
             $table->string('donor_document_hash', 64)->nullable()->after('donor_document_encrypted');
             $table->timestamp('lgpd_consent_at')->nullable()->after('donor_document_hash');
@@ -44,7 +45,7 @@ return new class extends Migration
 
     public function down(): void
     {
-        Schema::table('donations', function (Blueprint $table) {
+        Schema::table('donation_causes', function (Blueprint $table) {
             $table->dropIndex(['donor_document_hash']);
             $table->dropColumn([
                 'donor_document_encrypted',

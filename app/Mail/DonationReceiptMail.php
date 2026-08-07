@@ -2,18 +2,19 @@
 
 namespace App\Mail;
 
-use App\Models\Donation;
+use App\Models\DonationCause;
 use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
 use Illuminate\Queue\SerializesModels;
 
 /**
- * DonationReceiptMail — comprovante/recibo da doação confirmada.
+ * DonationReceiptMail — comprovante/recibo da DOAÇÃO A CAUSA confirmada.
  *
- * Enviado quando a doação vira `paid` (DonationController::markAsPaid), tanto
- * para doador logado quanto para guest. Discrimina o rateio: bruto, taxa de
- * 12% da OSCIP, custo do meio de pagamento (quando conhecido) e o líquido
- * destinado à causa.
+ * É o recibo por e-mail do checkout (model DonationCause) — não confundir com
+ * o legado DonationReceipt (comprovante manual ligado a need). Enviado quando
+ * a doação vira `paid` (DonationCauseController::markAsPaid), tanto para
+ * doador logado quanto para guest. Discrimina o rateio: bruto, taxa de 12% da
+ * OSCIP, custo do meio de pagamento (quando conhecido) e o líquido à causa.
  *
  * NÃO promete redução de IRPF — a modalidade ativa é doação com recibo da
  * OSCIP, sem projeto de incentivo homologado.
@@ -22,7 +23,7 @@ class DonationReceiptMail extends Mailable
 {
     use Queueable, SerializesModels;
 
-    public function __construct(public Donation $donation)
+    public function __construct(public DonationCause $donation)
     {
     }
 
