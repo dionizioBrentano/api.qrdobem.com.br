@@ -128,7 +128,7 @@ class DonationCauseController extends Controller
 
         $rules = [
             'amount'                 => 'required|numeric|min:1',
-            'payment_method'         => 'required|string|in:pix,credit_card,citizen_card',
+            'payment_method'         => 'required|string|in:pix,citizen_card',
             'cause_slug'             => 'sometimes|nullable|string',
             'is_anonymous'           => 'sometimes|boolean',
             'message'                => 'sometimes|nullable|string|max:500',
@@ -147,6 +147,10 @@ class DonationCauseController extends Controller
         }
 
         $validated = $request->validate($rules);
+
+        if ($validated['payment_method'] === 'citizen_card') {
+            return response()->json(['error' => 'Forma de pagamento indisponível no momento.'], 422);
+        }
 
         // Identidade do guest: CPF validado pelo algoritmo já existente, depois
         // cifrado (cast) e reduzido a blind index para conciliação. O CPF em
@@ -221,35 +225,200 @@ class DonationCauseController extends Controller
             'message'                  => $validated['message'] ?? null,
         ]);
 
-        // A criação da preferência no Mercado Pago pode falhar por rede.
+        // A criação do PIX no Mercado Pago pode falhar por rede.
         // A doação já está gravada como `pending`, então o usuário pode
         // retomar — perder o registro seria pior que um pagamento pendente.
         try {
-            $preference = $this->mercadoPago->createDonationPreference($donation);
+            $payment = $this->mercadoPago->createDonationPixPayment(
+                $donation,
+                $isGuest ? $validated['payer_email'] : $tenant->email,
+                $isGuest ? $validated['payer_name'] : $tenant->name,
+                $isGuest ? $validated['payer_cpf'] : null
+            );
 
-            if (!$preference) {
-                throw new \Exception("Falha ao criar preferência no Mercado Pago");
+            if (!$payment) {
+                throw new \Exception("Falha ao criar pagamento PIX no Mercado Pago");
             }
 
             $donation->update([
-                'mp_preference_id' => $preference['id'] ?? null,
+                'mp_payment_id' => $payment['id'] ?? null,
             ]);
 
             return response()->json([
-                'message'      => 'Doação iniciada.',
-                'donation_id'  => $donation->id,
-                'public_token' => $donation->public_token,
-                'status_path'  => '/doacao/status/' . $donation->public_token,
-                'checkout'     => $preference,
+                'message'        => 'Doação iniciada.',
+                'donation_id'    => $donation->id,
+                'public_token'   => $donation->public_token,
+                'status_path'    => '/doacao/status/' . $donation->public_token,
+                'status'         => $donation->status,
+                'payment_method' => $donation->payment_method,
+                'pix' => [
+                    'qr_code'        => $payment['point_of_interaction']['transaction_data']['qr_code'] ?? null,
+                    'qr_code_base64' => $payment['point_of_interaction']['transaction_data']['qr_code_base64'] ?? null,
+                ],
             ], 201);
         } catch (\Throwable $e) {
-            Log::error('DonationCauseController: falha ao criar preferência', [
+            Log::error('DonationCauseController: falha ao criar pagamento PIX', [
                 'donation_id' => $donation->id,
                 'error'       => $e->getMessage(),
             ]);
 
             return response()->json([
                 'error'       => 'Não foi possível iniciar o pagamento agora. Tente de novo.',
+                'donation_id' => $donation->id,
+            ], 503);
+        }
+    }
+
+    /**
+     * POST /donation-causes/card — auth OPCIONAL
+     * Processa o Checkout transparente do Cartão (Payment Brick).
+     */
+    public function storeCard(
+        Request $request,
+        DonationFeeCalculator $calculator,
+        CpfValidator $cpfValidator,
+        CpfIdentityService $cpfIdentity
+    ) {
+        $tenant  = $request->tenant instanceof Tenant ? $request->tenant : null;
+        $isGuest = !$tenant;
+
+        $rules = [
+            'amount'                 => 'required|numeric|min:1',
+            'payment_method'         => 'required|string|in:credit_card',
+            'cause_slug'             => 'sometimes|nullable|string',
+            'is_anonymous'           => 'sometimes|boolean',
+            'message'                => 'sometimes|nullable|string|max:500',
+            'cover_fees'             => 'sometimes|boolean',
+            'extra_platform_support' => 'sometimes|numeric|min:0',
+            
+            // Dados do Brick de cartão
+            'token'                  => 'required|string',
+            'payment_method_id'      => 'required|string',
+            'installments'           => 'required|integer|min:1',
+            'payer.email'            => 'required|email',
+            'payer.identification.type'   => 'sometimes|nullable|string',
+            'payer.identification.number' => 'sometimes|nullable|string',
+            'issuer_id'              => 'sometimes|nullable|string',
+        ];
+
+        if ($isGuest) {
+            $rules['payer_name']   = 'required|string|max:255';
+            $rules['payer_email']  = 'required|email|max:255';
+            $rules['payer_cpf']    = 'required|string|max:20';
+            $rules['consent_lgpd'] = 'accepted';
+        }
+
+        $validated = $request->validate($rules);
+
+        $donorDocumentEncrypted = null;
+        $donorDocumentHash      = null;
+        $lgpdConsentAt          = null;
+
+        if ($isGuest) {
+            $cpfNormalized = preg_replace('/\D/', '', $validated['payer_cpf']);
+
+            if (!$cpfValidator->isValid($cpfNormalized)) {
+                return response()->json(['error' => 'CPF inválido.'], 422);
+            }
+
+            $donorDocumentEncrypted = $cpfNormalized;
+            $donorDocumentHash      = $cpfIdentity->hash($cpfNormalized);
+            $lgpdConsentAt          = now();
+        }
+
+        $causeSpace = null;
+        if (!empty($validated['cause_slug'])) {
+            $causeSpace = Space::where('slug', $validated['cause_slug'])
+                ->where('type', Space::TYPE_CAUSE)
+                ->first();
+
+            if (!$causeSpace) {
+                return response()->json(['error' => 'Causa não encontrada.'], 404);
+            }
+        }
+
+        try {
+            $breakdown = $calculator->breakdown(
+                (float) $validated['amount'],
+                (bool) ($validated['cover_fees'] ?? false),
+                0.0,
+                (float) ($validated['extra_platform_support'] ?? 0),
+            );
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
+
+        $donation = DonationCause::create([
+            'public_token'             => Str::random(32),
+            'cause_space_id'           => $causeSpace?->id,
+            'donor_tenant_id'          => $tenant?->id,
+            'donor_name'               => $isGuest ? $validated['payer_name']  : $tenant->name,
+            'donor_email'              => $isGuest ? $validated['payer_email'] : $tenant->email,
+            'donor_document_encrypted' => $donorDocumentEncrypted,
+            'donor_document_hash'      => $donorDocumentHash,
+            'lgpd_consent_at'          => $lgpdConsentAt,
+            'amount'                   => $breakdown['total_to_pay'],
+            'amount_gross'             => $breakdown['amount_gross'],
+            'platform_fee_percent'     => $breakdown['platform_fee_percent'],
+            'platform_fee_amount'      => $breakdown['platform_fee_amount'],
+            'payment_fee_amount'       => $breakdown['payment_fee_amount'],
+            'amount_to_cause'          => $breakdown['amount_to_cause'],
+            'cover_fees'               => $breakdown['cover_fees'],
+            'extra_platform_support'   => $breakdown['extra_platform_support'],
+            'payment_method'           => 'credit_card',
+            'status'                   => 'pending',
+            'is_anonymous'             => $validated['is_anonymous'] ?? false,
+            'message'                  => $validated['message'] ?? null,
+        ]);
+
+        try {
+            $payment = $this->mercadoPago->createDonationCardPayment(
+                $donation,
+                $validated['payer']['email'],
+                $validated['token'],
+                $validated['payment_method_id'],
+                $validated['installments'],
+                $validated['issuer_id'] ?? null,
+                $validated['payer']['identification']['type'] ?? null,
+                $validated['payer']['identification']['number'] ?? null
+            );
+
+            if (!$payment) {
+                throw new \Exception("Falha ao processar cartão no Mercado Pago");
+            }
+
+            $donation->update([
+                'mp_payment_id' => $payment['id'] ?? null,
+            ]);
+
+            if (($payment['status'] ?? '') === 'approved') {
+                self::markAsPaid($donation, $payment['status_detail'] ?? null);
+                
+                return response()->json([
+                    'message'      => 'Doação concluída.',
+                    'donation_id'  => $donation->id,
+                    'public_token' => $donation->public_token,
+                    'status_path'  => '/doacao/status/' . $donation->public_token,
+                    'status'       => 'paid',
+                ], 201);
+            }
+
+            // Em processamento ou recusado
+            return response()->json([
+                'message'      => 'Pagamento ' . ($payment['status'] ?? 'pending'),
+                'donation_id'  => $donation->id,
+                'public_token' => $donation->public_token,
+                'status_path'  => '/doacao/status/' . $donation->public_token,
+                'status'       => 'pending',
+            ], 201);
+        } catch (\Throwable $e) {
+            Log::error('DonationCauseController: falha ao processar cartão', [
+                'donation_id' => $donation->id,
+                'error'       => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'error'       => 'Não foi possível processar o cartão agora. Tente de novo.',
                 'donation_id' => $donation->id,
             ], 503);
         }

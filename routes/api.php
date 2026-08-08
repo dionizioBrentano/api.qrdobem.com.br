@@ -270,6 +270,9 @@ Route::middleware('auth.firebase.optional')->group(function () {
     Route::post('/donation-causes', [DonationCauseController::class, 'store'])
         ->middleware('throttle:donation-create');
 
+    Route::post('/donation-causes/card', [DonationCauseController::class, 'storeCard'])
+        ->middleware('throttle:donation-create');
+
     Route::post('/donation-causes/preview', [DonationCauseController::class, 'preview'])
         ->middleware('throttle:donation-preview');
 });

@@ -249,33 +249,42 @@ class MercadoPagoService
     }
 
     /**
-     * Preferência de checkout para uma DOAÇÃO (Fase 4, T4-R01/T4-R02).
-     *
-     * Separada de createPreference() de propósito: a doação tem outra
-     * descrição, outra volta de URL e outro metadata. Reaproveitar o método
-     * de créditos obrigaria a encher de condicional um caminho que já é
-     * crítico — e créditos e doações não podem se confundir na conciliação.
-     *
-     * O `external_reference` leva o prefixo `donation-` justamente para que
-     * a conciliação bancária distinga um do outro sem consultar o banco.
+     * Cria um pagamento PIX de DOAÇÃO no Mercado Pago (Checkout API).
+     * Não logamos o token.
      */
-    public function createDonationPreference(\App\Models\DonationCause $donation): ?array
-    {
+    public function createDonationPixPayment(
+        \App\Models\DonationCause $donation,
+        string $payerEmail,
+        ?string $payerName = null,
+        ?string $payerCpf = null
+    ): ?array {
         $token = $this->getAccessToken();
-        $frontendUrl = rtrim(config('mercadopago.frontend_url'), '/');
+
+        $payer = ['email' => $payerEmail];
+
+        if ($payerName) {
+            $parts = preg_split('/\s+/', trim($payerName), 2);
+            $payer['first_name'] = $parts[0];
+            if (!empty($parts[1])) {
+                $payer['last_name'] = $parts[1];
+            }
+        }
+
+        if ($payerCpf) {
+            $payer['identification'] = [
+                'type' => 'CPF',
+                'number' => preg_replace('/\D/', '', $payerCpf),
+            ];
+        }
 
         $causeName = $donation->cause?->name ?? 'QR do Bem';
         $reference = 'donation-' . $donation->id;
 
         $payload = [
-            'items' => [
-                [
-                    'title' => 'Doação — ' . $causeName,
-                    'quantity' => 1,
-                    'unit_price' => (float) $donation->amount,
-                    'currency_id' => 'BRL',
-                ],
-            ],
+            'transaction_amount' => (float) $donation->amount,
+            'description' => 'Doação — ' . $causeName,
+            'payment_method_id' => 'pix',
+            'payer' => $payer,
             'external_reference' => $reference,
             'metadata' => [
                 'kind' => 'donation',
@@ -283,22 +292,19 @@ class MercadoPagoService
                 'cause_space_id' => $donation->cause_space_id,
                 'donor_tenant_id' => $donation->donor_tenant_id,
             ],
-            'back_urls' => [
-                'success' => $frontendUrl . '/doacoes?status=success',
-                'pending' => $frontendUrl . '/doacoes?status=pending',
-                'failure' => $frontendUrl . '/doacoes?status=failure',
-            ],
-            'auto_return' => 'approved',
         ];
 
         try {
             $response = Http::withToken($token)
                 ->timeout(10)
                 ->connectTimeout(5)
-                ->post('https://api.mercadopago.com/checkout/preferences', $payload);
+                ->withHeaders([
+                    'X-Idempotency-Key' => $reference,
+                ])
+                ->post('https://api.mercadopago.com/v1/payments', $payload);
         } catch (ConnectionException $e) {
-            Log::error('MercadoPago createDonationPreference: timeout/conexão', [
-                'donation_id' => $donation->id,
+            Log::error('MercadoPago createDonationPixPayment: timeout/conexão', [
+                'external_reference' => $reference,
                 'message' => $e->getMessage(),
             ]);
             return null;
@@ -308,10 +314,91 @@ class MercadoPagoService
             return $response->json();
         }
 
-        Log::error('MercadoPago createDonationPreference falhou', [
-            'donation_id' => $donation->id,
+        Log::error('MercadoPago createDonationPixPayment falhou', [
+            'external_reference' => $reference,
             'http_status' => $response->status(),
             'body' => $response->json(),
+            'mode' => config('mercadopago.mode'),
+        ]);
+
+        return null;
+    }
+
+    /**
+     * Cria um pagamento com Cartão de DOAÇÃO via Checkout API (Payment Brick).
+     * Não logamos o token.
+     */
+    public function createDonationCardPayment(
+        \App\Models\DonationCause $donation,
+        string $payerEmail,
+        string $token,
+        string $paymentMethodId,
+        int $installments = 1,
+        ?string $issuerId = null,
+        ?string $identificationType = null,
+        ?string $identificationNumber = null
+    ): ?array {
+        $accessToken = $this->getAccessToken();
+
+        $payer = [
+            'email' => $payerEmail,
+        ];
+
+        if ($identificationNumber) {
+            $payer['identification'] = [
+                'type' => $identificationType ?? 'CPF',
+                'number' => preg_replace('/\D/', '', $identificationNumber),
+            ];
+        }
+
+        $causeName = $donation->cause?->name ?? 'QR do Bem';
+        $reference = 'donation-' . $donation->id;
+
+        $payload = [
+            'transaction_amount' => (float) $donation->amount,
+            'description' => 'Doação — ' . $causeName,
+            'payment_method_id' => $paymentMethodId,
+            'token' => $token,
+            'installments' => $installments,
+            'payer' => $payer,
+            'external_reference' => $reference,
+            'metadata' => [
+                'kind' => 'donation',
+                'donation_id' => $donation->id,
+                'cause_space_id' => $donation->cause_space_id,
+                'donor_tenant_id' => $donation->donor_tenant_id,
+            ],
+        ];
+
+        if ($issuerId) {
+            $payload['issuer_id'] = $issuerId;
+        }
+
+        try {
+            $response = Http::withToken($accessToken)
+                ->timeout(10)
+                ->connectTimeout(5)
+                ->withHeaders([
+                    'X-Idempotency-Key' => $reference,
+                ])
+                ->post('https://api.mercadopago.com/v1/payments', $payload);
+        } catch (ConnectionException $e) {
+            Log::error('MercadoPago createDonationCardPayment: timeout/conexão', [
+                'external_reference' => $reference,
+                'message' => $e->getMessage(),
+            ]);
+            return null;
+        }
+
+        if ($response->successful()) {
+            return $response->json();
+        }
+
+        Log::error('MercadoPago createDonationCardPayment falhou', [
+            'external_reference' => $reference,
+            'http_status' => $response->status(),
+            'body' => $response->json(),
+            'sent_payload' => array_diff_key($payload, ['token' => '']),
         ]);
 
         return null;
