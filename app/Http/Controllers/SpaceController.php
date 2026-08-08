@@ -251,10 +251,14 @@ class SpaceController extends Controller
             'permissions'     => app(SpacePolicy::class)->permissionsFor($tenant, $space),
             'cause'           => $space->causeProfile ? [
                 'headline'      => $space->causeProfile->headline,
+                'story'         => $space->causeProfile->story,
                 'category'      => $space->causeProfile->category,
+                'city'          => $space->causeProfile->city,
+                'state'         => $space->causeProfile->state,
                 'goal_amount'   => $space->causeProfile->goal_amount,
                 'raised_amount' => $space->causeProfile->raised_amount,
                 'progress'      => $space->causeProfile->progressPercent(),
+                'accountability'=> $space->causeProfile->accountability,
                 'is_published'  => $space->causeProfile->is_published,
             ] : null,
         ];
