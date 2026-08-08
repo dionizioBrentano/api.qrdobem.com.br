@@ -16,6 +16,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Str;
 
 /**
  * DonationCauseController — doação FINANCEIRA a uma causa (checkout). Fase 4.
@@ -225,6 +226,10 @@ class DonationCauseController extends Controller
         // retomar — perder o registro seria pior que um pagamento pendente.
         try {
             $preference = $this->mercadoPago->createDonationPreference($donation);
+
+            if (!$preference) {
+                throw new \Exception("Falha ao criar preferência no Mercado Pago");
+            }
 
             $donation->update([
                 'mp_preference_id' => $preference['id'] ?? null,
