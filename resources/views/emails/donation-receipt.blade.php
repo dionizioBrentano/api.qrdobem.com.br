@@ -59,6 +59,14 @@
             Rouanet, do Fundo da Criança (FIA) ou do Esporte, que exigem projeto homologado.
         </p>
 
+        @if($donation->public_token)
+            <div style="text-align: center; margin-top: 30px;">
+                <a href="{{ url('/doacao/status/' . $donation->public_token) }}" style="display: inline-block; background-color: #1a73e8; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 4px; font-weight: bold;">
+                    Acompanhar Status da Doação
+                </a>
+            </div>
+        @endif
+
         <hr style="border: none; border-top: 1px solid #eeeeee; margin: 30px 0;" />
         <p style="color: #999999; font-size: 12px; text-align: center;">Equipe QR do Bem</p>
     </div>

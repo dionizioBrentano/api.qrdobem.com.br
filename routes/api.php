@@ -164,6 +164,8 @@ Route::middleware('auth.firebase')->group(function () {
 
     Route::get('/entities', [EntityController::class, 'index']);
     Route::post('/entities', [EntityController::class, 'store']);
+    Route::get('/entities/{unique_code}/edit', [EntityController::class, 'edit']);
+    Route::put('/entities/{unique_code}', [EntityController::class, 'update']);
     // QR Code gerado pela API (whitelabel: nenhum frontend precisa gerar imagem)
     Route::get('/entities/{unique_code}/qrcode', [EntityController::class, 'qrCode']);
     Route::post('/entities/{unique_code}/vaccinations', [EntityController::class, 'addVaccination']);
@@ -271,6 +273,10 @@ Route::middleware('auth.firebase.optional')->group(function () {
     Route::post('/donation-causes/preview', [DonationCauseController::class, 'preview'])
         ->middleware('throttle:donation-preview');
 });
+
+Route::get('/donation-causes/status/{token}', [DonationCauseController::class, 'publicStatus'])
+    ->middleware('throttle:donation-preview');
+
 
 // Últimas doações de uma causa — prova social do lado do dinheiro. Path
 // cause-scoped mantido (é leitura pública sob a causa, não checkout).

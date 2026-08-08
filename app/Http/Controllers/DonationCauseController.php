@@ -196,6 +196,7 @@ class DonationCauseController extends Controller
         }
 
         $donation = DonationCause::create([
+            'public_token'             => Str::random(32),
             'cause_space_id'           => $causeSpace?->id,
             // Guest fica com tenant nulo — sem criar conta fantasma. Logado
             // é atribuído à conta e usa os dados do perfil.
@@ -230,9 +231,11 @@ class DonationCauseController extends Controller
             ]);
 
             return response()->json([
-                'message'    => 'Doação iniciada.',
-                'donation_id' => $donation->id,
-                'checkout'   => $preference,
+                'message'      => 'Doação iniciada.',
+                'donation_id'  => $donation->id,
+                'public_token' => $donation->public_token,
+                'status_path'  => '/doacao/status/' . $donation->public_token,
+                'checkout'     => $preference,
             ], 201);
         } catch (\Throwable $e) {
             Log::error('DonationCauseController: falha ao criar preferência', [
@@ -429,7 +432,7 @@ class DonationCauseController extends Controller
         // idempotência acima já retornou nas notificações repetidas).
         if ($donation->donor_email) {
             try {
-                Mail::to($donation->donor_email)->send(new DonationReceiptMail($donation));
+                Mail::to($donation->donor_email)->queue(new DonationReceiptMail($donation));
             } catch (\Throwable $e) {
                 Log::warning('DonationCauseController: falha ao enviar recibo da doação', [
                     'donation_id' => $donation->id,
@@ -437,5 +440,33 @@ class DonationCauseController extends Controller
                 ]);
             }
         }
+    }
+
+    /**
+     * Consulta pública de status sem PII.
+     */
+    public function publicStatus(string $token)
+    {
+        $donation = DonationCause::with('cause')->where('public_token', $token)->first();
+
+        if (!$donation) {
+            return response()->json(['error' => 'Doação não encontrada.'], 404);
+        }
+
+        return response()->json([
+            'status'               => $donation->status,
+            'amount_gross'         => $donation->amount_gross,
+            'platform_fee_percent' => $donation->platform_fee_percent,
+            'platform_fee_amount'  => $donation->platform_fee_amount,
+            'payment_fee_amount'   => $donation->payment_fee_amount,
+            'amount_to_cause'      => $donation->amount_to_cause,
+            'cover_fees'           => $donation->cover_fees,
+            'cause'                => $donation->cause ? [
+                'name' => $donation->cause->name,
+                'slug' => $donation->cause->slug,
+            ] : null,
+            'paid_at'              => $donation->paid_at ? $donation->paid_at->format('Y-m-d H:i:s') : null,
+            'created_at'           => $donation->created_at ? $donation->created_at->format('Y-m-d H:i:s') : null,
+        ]);
     }
 }

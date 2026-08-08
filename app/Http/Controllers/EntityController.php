@@ -8,6 +8,7 @@ use App\Models\EntityHealthField;
 use App\Models\EntityObjectField;
 use App\Models\AuditLog;
 use App\Http\Requests\EntityStoreRequest;
+use App\Http\Requests\EntityUpdateRequest;
 use App\Models\CreditBatch;
 use App\Models\HeatmapCell;
 use App\Models\Organization;
@@ -352,6 +353,172 @@ class EntityController extends Controller
             'qr_code_base64' => $this->qrCode->dataUriFor($uniqueCode),
             'qr_code_url' => url("/api/entities/{$uniqueCode}/qrcode"),
         ], 201);
+    }
+
+    public function edit(Request $request, $unique_code)
+    {
+        $tenant = $request->tenant;
+
+        $entity = Entity::with(['customAttributes', 'healthFields', 'petFields', 'vaccinations', 'objectFields'])
+            ->where('unique_code', $unique_code)
+            ->first();
+
+        if (!$entity || !$this->canAccessEntity($tenant, $entity)) {
+            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
+        }
+
+        return response()->json([
+            'unique_code' => $entity->unique_code,
+            'type' => $entity->type,
+            'name' => $entity->encrypted_name,
+            'contact_phone' => $entity->encrypted_contact_phone,
+            'contact_email' => $entity->encrypted_contact_email,
+            'medical_info' => $entity->encrypted_medical_info,
+            'additional_info' => $entity->encrypted_additional_info,
+            'health_fields' => $entity->healthFields->map(function ($hf) {
+                return [
+                    'field_key' => $hf->field_key,
+                    'field_value' => $hf->field_value,
+                    'is_public' => $hf->is_public,
+                ];
+            }),
+            'pet_fields' => $entity->type === 'pet' ? $this->ownerPetInfo($entity) : null,
+            'object_fields' => $entity->type === 'object' ? $entity->objectFields : null,
+            'custom_attributes' => $entity->customAttributes->mapWithKeys(function ($attr) {
+                return [$attr->key => $attr->value];
+            })->all(),
+            'vaccinations' => $entity->type === 'pet' ? $entity->vaccinations->map(function ($v) {
+                return [
+                    'vaccine_name' => $v->vaccine_name,
+                    'applied_at' => $v->applied_at ? $v->applied_at->format('Y-m-d') : null,
+                ];
+            }) : null,
+        ]);
+    }
+
+    public function update(EntityUpdateRequest $request, $unique_code)
+    {
+        $tenant = $request->tenant;
+
+        $entity = Entity::where('unique_code', $unique_code)->first();
+
+        if (!$entity || !$this->canAccessEntity($tenant, $entity)) {
+            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
+        }
+
+        $entityType = $entity->type;
+
+        $entity->update([
+            'encrypted_name' => $request->name,
+            'encrypted_contact_phone' => $request->contact_phone,
+            'encrypted_contact_email' => $request->contact_email,
+            'encrypted_medical_info' => $request->medical_info,
+            'encrypted_additional_info' => $request->additional_info,
+        ]);
+
+        if ($request->has('custom_attributes') && is_array($request->custom_attributes)) {
+            $customAttrs = $request->custom_attributes;
+
+            if (count($customAttrs) > 20) {
+                return response()->json(['error' => 'Máximo de 20 atributos personalizados.'], 422);
+            }
+
+            $entity->customAttributes()->delete();
+
+            foreach ($customAttrs as $key => $value) {
+                if (!is_string($key) || !is_string($value)) {
+                    continue;
+                }
+                $key = substr(strip_tags($key), 0, 100);
+                $value = substr(strip_tags($value), 0, 500);
+
+                $entity->customAttributes()->create([
+                    'key' => $key,
+                    'value' => $value,
+                ]);
+            }
+        } else {
+            $entity->customAttributes()->delete();
+        }
+
+        $entity->healthFields()->delete();
+        foreach ((array) $request->input('health_fields', []) as $field) {
+            $key = $field['field_key'] ?? null;
+            $value = $field['field_value'] ?? null;
+
+            if (!$key || $value === null || trim($value) === '') {
+                continue;
+            }
+
+            $entity->healthFields()->create([
+                'field_key' => $key,
+                'is_public' => in_array($key, EntityHealthField::ALWAYS_RESTRICTED, true)
+                    ? false
+                    : filter_var($field['is_public'] ?? false, FILTER_VALIDATE_BOOLEAN),
+                'field_value' => $value,
+            ]);
+        }
+
+        if ($entityType === 'pet' && $request->filled('pet_fields')) {
+            $petFields = $request->input('pet_fields');
+
+            $entity->petFields()->updateOrCreate(
+                ['entity_id' => $entity->id],
+                [
+                    'species' => $petFields['species'],
+                    'species_other_description' => $petFields['species'] === 'other'
+                        ? ($petFields['species_other_description'] ?? null)
+                        : null,
+                    'size' => $petFields['size'] ?? null,
+                    'color' => $petFields['color'] ?? null,
+                    'is_neutered' => $petFields['is_neutered'] ?? null,
+                    'physical_description' => $petFields['physical_description'] ?? null,
+                    'clinical_notes' => $petFields['clinical_notes'] ?? null,
+                    'reference_contact' => $petFields['reference_contact'] ?? null,
+                    'size_is_public' => filter_var($petFields['size_is_public'] ?? true, FILTER_VALIDATE_BOOLEAN),
+                    'color_is_public' => filter_var($petFields['color_is_public'] ?? true, FILTER_VALIDATE_BOOLEAN),
+                    'is_neutered_is_public' => filter_var($petFields['is_neutered_is_public'] ?? true, FILTER_VALIDATE_BOOLEAN),
+                    'physical_description_is_public' => filter_var($petFields['physical_description_is_public'] ?? true, FILTER_VALIDATE_BOOLEAN),
+                    'clinical_notes_is_public' => filter_var($petFields['clinical_notes_is_public'] ?? true, FILTER_VALIDATE_BOOLEAN),
+                    'reference_contact_is_public' => filter_var($petFields['reference_contact_is_public'] ?? false, FILTER_VALIDATE_BOOLEAN),
+                    'vaccinations_is_public' => filter_var($petFields['vaccinations_is_public'] ?? true, FILTER_VALIDATE_BOOLEAN),
+                ]
+            );
+
+            if ($request->has('vaccinations')) {
+                $entity->vaccinations()->delete();
+                foreach ((array) $request->input('vaccinations', []) as $vaccination) {
+                    $entity->vaccinations()->create([
+                        'vaccine_name' => $vaccination['vaccine_name'],
+                        'applied_at' => $vaccination['applied_at'],
+                    ]);
+                }
+            }
+        }
+
+        if ($entityType === 'object' && $request->filled('object_fields')) {
+            $objectFields = $request->input('object_fields');
+
+            $entity->objectFields()->updateOrCreate(
+                ['entity_id' => $entity->id],
+                [
+                    'description' => $objectFields['description'] ?? null,
+                    'description_is_public' => filter_var($objectFields['description_is_public'] ?? false, FILTER_VALIDATE_BOOLEAN),
+                    'public_label' => $objectFields['public_label'] ?? null,
+                    'handling_fragile' => filter_var($objectFields['handling_fragile'] ?? false, FILTER_VALIDATE_BOOLEAN),
+                    'handling_light_sensitive' => filter_var($objectFields['handling_light_sensitive'] ?? false, FILTER_VALIDATE_BOOLEAN),
+                    'handling_keep_refrigerated' => filter_var($objectFields['handling_keep_refrigerated'] ?? false, FILTER_VALIDATE_BOOLEAN),
+                    'handling_do_not_invert' => filter_var($objectFields['handling_do_not_invert'] ?? false, FILTER_VALIDATE_BOOLEAN),
+                    'handling_sentimental_value' => filter_var($objectFields['handling_sentimental_value'] ?? false, FILTER_VALIDATE_BOOLEAN),
+                    'handling_notes_extra' => $objectFields['handling_notes_extra'] ?? null,
+                ]
+            );
+        }
+
+        return response()->json([
+            'message' => 'Entidade atualizada com sucesso.',
+            'unique_code' => $unique_code,
+        ], 200);
     }
 
     /**

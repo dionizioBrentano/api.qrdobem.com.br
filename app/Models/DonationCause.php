@@ -27,6 +27,7 @@ class DonationCause extends Model
     public const METHOD_CITIZEN_CARD = 'citizen_card';
 
     protected $fillable = [
+        'public_token',
         'cause_space_id',
         'donor_tenant_id',
         'donor_name',
