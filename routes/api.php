@@ -44,6 +44,8 @@ Route::middleware('throttle:public-messages')->group(function () {
     Route::post('/waitlist', [\App\Http\Controllers\WaitlistController::class, 'store']);
 });
 
+Route::get('/credits/mp-public-config', [CreditController::class, 'publicConfig']);
+
 // Webhooks
 // Nota sobre CSRF: No Laravel 11, rotas definidas em routes/api.php utilizam
 // apenas o middleware group 'api', que por padrão NÃO inclui o VerifyCsrfToken.
@@ -188,7 +190,6 @@ Route::middleware('auth.firebase')->group(function () {
     Route::post('/conversations/{conversation_id}/resolve', [ConversationController::class, 'resolve']);
 
     // Credits / Checkout (Sprint 10 & S15 & S17)
-    Route::get('/credits/mp-public-config', [CreditController::class, 'publicConfig']);
     Route::get('/credits/pricing', [CreditController::class, 'pricing']);
     Route::post('/credits/checkout', [CreditController::class, 'checkout']);
     Route::post('/credits/checkout/card', [CreditController::class, 'checkoutCard']);
