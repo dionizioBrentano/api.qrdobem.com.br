@@ -74,6 +74,7 @@ class SpaceController extends Controller
             'type'            => 'required|string|in:' . implode(',', Space::TYPES),
             'name'            => 'required|string|max:255',
             'organization_id' => 'sometimes|nullable|integer',
+            'parent_space_id' => 'sometimes|nullable|integer|exists:spaces,id',
             // Campos da vitrine, quando o tipo é `cause`.
             'headline'        => 'sometimes|nullable|string|max:255',
             'category'        => 'sometimes|nullable|string|max:50',
@@ -88,6 +89,7 @@ class SpaceController extends Controller
                 'owner_tenant_id' => $tenant->id,
                 // Nulo é o caso normal da causa de pessoa física (T2-R01).
                 'organization_id' => $validated['organization_id'] ?? null,
+                'parent_space_id' => $validated['parent_space_id'] ?? null,
                 'type'            => $validated['type'],
                 'name'            => $validated['name'],
                 'slug'            => Space::generateSlug($validated['name']),
@@ -231,6 +233,92 @@ class SpaceController extends Controller
             'child'   => ['id' => $child->id, 'name' => $child->name],
             // Registrado em texto porque a consequência é jurídica, não técnica.
             'note'    => 'O recibo dedutível é emitido pela entidade certificada, não pelo grupo apoiado.',
+        ]);
+    }
+
+    /**
+     * POST /spaces/{space}/transfer-credits
+     * Transfere lotes de créditos do espaço pai para um espaço filho (T2-R02 - Fase 3).
+     */
+    public function transferCredits(Request $request, $spaceId)
+    {
+        $parent = Space::find($spaceId);
+
+        if (!$parent) {
+            return response()->json(['error' => 'Espaço não encontrado.'], 404);
+        }
+
+        app(SpacePolicy::class)->authorize($request->tenant, $parent, 'space.edit');
+
+        $validated = $request->validate([
+            'child_space_id' => 'required|integer',
+            'amount' => 'required|integer|min:1',
+        ]);
+
+        $child = Space::where('id', $validated['child_space_id'])
+            ->where('parent_space_id', $parent->id)
+            ->first();
+
+        if (!$child) {
+            return response()->json(['error' => 'Subgrupo não encontrado ou não pertence a este espaço.'], 404);
+        }
+
+        // Descobrir qual o saldo disponível da Org/Tenant Pai
+        $tenantId = $parent->owner_tenant_id;
+        $orgId = $parent->organization_id;
+
+        $availableQuery = \App\Models\CreditBatch::where('status', 'active')
+            ->where(function($q) {
+                $q->whereNull('expires_at')->orWhere('expires_at', '>=', now());
+            });
+
+        if ($orgId) {
+            $availableQuery->where('organization_id', $orgId);
+        } else {
+            $availableQuery->where('recipient_tenant_id', $tenantId);
+        }
+
+        $totalAvailable = $availableQuery->sum('amount_available');
+
+        if ($totalAvailable < $validated['amount']) {
+            return response()->json(['error' => 'Saldo insuficiente no espaço/organização de origem.'], 422);
+        }
+
+        $remainingToTransfer = $validated['amount'];
+
+        DB::transaction(function() use (&$remainingToTransfer, $availableQuery, $child, $request) {
+            $batches = (clone $availableQuery)->where('amount_available', '>', 0)->orderBy('expires_at', 'asc')->get();
+            
+            foreach ($batches as $batch) {
+                if ($remainingToTransfer <= 0) break;
+                
+                $deduct = min($batch->amount_available, $remainingToTransfer);
+                $batch->amount_available -= $deduct;
+                if ($batch->amount_available === 0) {
+                    $batch->status = 'exhausted';
+                }
+                $batch->save();
+                
+                // Cria lote espelho no espaço filho
+                \App\Models\CreditBatch::create([
+                    'creator_tenant_id' => $request->tenant->id,
+                    'recipient_tenant_id' => clone $child->organization_id ? null : clone $child->owner_tenant_id,
+                    'organization_id' => $child->organization_id,
+                    'space_id' => $child->id,
+                    'amount_total' => $deduct,
+                    'amount_available' => $deduct,
+                    'unit_price' => $batch->unit_price,
+                    'expires_at' => $batch->expires_at,
+                    'status' => 'active',
+                    'source' => "Transferência do espaço pai #{$batch->space_id ?? 'Geral'}",
+                ]);
+
+                $remainingToTransfer -= $deduct;
+            }
+        });
+
+        return response()->json([
+            'message' => 'Créditos repassados com sucesso.',
         ]);
     }
 

@@ -12,7 +12,9 @@ class CreditBatch extends Model
 
     protected $fillable = [
         'creator_tenant_id',
+        'recipient_tenant_id',
         'organization_id',
+        'space_id',
         'amount_total',
         'amount_available',
         'unit_price',

@@ -130,6 +130,13 @@ Route::middleware('auth.firebase')->group(function () {
     Route::get('/spaces/{space}', [SpaceController::class, 'show']);
     Route::put('/spaces/{space}', [SpaceController::class, 'update']);
     Route::post('/spaces/{space}/children', [SpaceController::class, 'attachChild']);
+    Route::post('/spaces/{space}/transfer-credits', [SpaceController::class, 'transferCredits']);
+
+    // Membros do Espaço (Hierarquia Horizontal)
+    Route::get('/spaces/{space}/members', [\App\Http\Controllers\SpaceMemberController::class, 'index']);
+    Route::post('/spaces/{space}/members/invite', [\App\Http\Controllers\SpaceMemberController::class, 'invite']);
+    Route::put('/spaces/{space}/members/{member}/role', [\App\Http\Controllers\SpaceMemberController::class, 'updateRole']);
+    Route::delete('/spaces/{space}/members/{member}', [\App\Http\Controllers\SpaceMemberController::class, 'remove']);
 
     // Vitrine da causa (Fase 3, T2-R04, T2-R05).
     Route::put('/spaces/{space}/cause', [CauseController::class, 'update']);
