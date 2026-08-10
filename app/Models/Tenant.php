@@ -107,4 +107,9 @@ class Tenant extends Model
     {
         return $this->hasMany(TenantTermAcceptance::class);
     }
+
+    public function receivedCreditBatches()
+    {
+        return $this->hasMany(CreditBatch::class, 'recipient_tenant_id');
+    }
 }

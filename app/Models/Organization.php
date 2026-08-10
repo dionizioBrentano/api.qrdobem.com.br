@@ -33,4 +33,9 @@ class Organization extends Model
     {
         return $this->hasMany(Entity::class);
     }
+
+    public function batches(): HasMany
+    {
+        return $this->hasMany(CreditBatch::class);
+    }
 }
