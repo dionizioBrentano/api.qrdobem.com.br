@@ -66,34 +66,31 @@ class EntityController extends Controller
         // na falta dele, do espaço vinculado à organização ativa.
         $space = $this->resolveSpace($request, $orgId);
 
-        if (!$orgId && !$space) {
-             return response()->json(['error' => 'Nenhuma organização vinculada.'], 403);
+        if (!$orgId && !$space && $this->availableCredits($tenant, $orgId) <= 0) {
+             return response()->json(['error' => 'Nenhuma organização vinculada e sem saldo disponível.'], 403);
         }
 
         // Soma lotes da Organização.
         // Créditos continuam pendurados na organização nesta fase — mover
         // para o espaço é entrega posterior, e misturar as duas coisas
         // agora arriscaria a cota de quem está em produção.
-        $activeQuota = $orgId
-            ? CreditBatch::where('organization_id', $orgId)
-                ->where('status', 'active')
-                ->where(function($query) {
-                    $query->whereNull('expires_at')->orWhere('expires_at', '>', now());
-                })
-                ->sum('amount_available')
-            : 0;
+        $activeQuota = $this->availableCredits($tenant, $orgId);
 
         // Pega as entidades do contexto ativo.
         // Com espaço conhecido, busca por espaço E pela organização, para
         // não esconder entidade que o backfill ainda não ligou.
         $entities = Entity::with(['petFields', 'vaccinations', 'objectFields'])
-            ->where(function ($query) use ($orgId, $space) {
+            ->where(function ($query) use ($orgId, $space, $tenant) {
                 if ($space) {
                     $query->orWhere('space_id', $space->id);
                 }
                 if ($orgId) {
                     $query->orWhere('organization_id', $orgId);
                 }
+                $query->orWhereHas('creditBatch', function($q) use ($tenant) {
+                    $q->where('recipient_tenant_id', $tenant->id)
+                      ->whereNull('organization_id');
+                });
             })
             ->orderBy('id', 'desc')
             ->get();
@@ -140,8 +137,8 @@ class EntityController extends Controller
         $orgId = $request->input('organization_id')
             ?? $tenant->organizations()->first()->id ?? null;
 
-        if (!$orgId) {
-             return response()->json(['error' => 'Nenhuma organização vinculada.'], 403);
+        if (!$orgId && $this->availableCredits($tenant, $orgId) <= 0) {
+             return response()->json(['error' => 'Nenhuma organização vinculada e sem saldo disponível.'], 403);
         }
 
         $space = $this->resolveSpace($request, $orgId);
@@ -158,14 +155,16 @@ class EntityController extends Controller
 
         // Validação US1.1: O bloqueio de acesso (profile_status)
         // verifica a integridade dos dados fiscais do responsável financeiro da Matriz.
-        $organization = Organization::find($orgId);
-        $owner = $organization->owner;
+        if ($orgId) {
+            $organization = Organization::find($orgId);
+            $owner = $organization?->owner;
 
-        if (!$owner || $owner->profile_status !== 'active') {
-            return response()->json([
-                'error' => 'O cadastro do responsável financeiro do grupo está pendente.',
-                'code' => 'PROFILE_INCOMPLETE'
-            ], 403);
+            if (!$owner || $owner->profile_status !== 'active') {
+                return response()->json([
+                    'error' => 'O cadastro do responsável financeiro do grupo está pendente.',
+                    'code' => 'PROFILE_INCOMPLETE'
+                ], 403);
+            }
         }
 
         // Gate 2: Endereço completo obrigatório para criar entidade (usar QR)
@@ -191,15 +190,8 @@ class EntityController extends Controller
             ], 403);
         }
 
-        // Inteligência de Consumo: Busca lote ativo da organização (sem fallback pessoal)
-        $validBatch = CreditBatch::where('organization_id', $orgId)
-            ->where('status', 'active')
-            ->where('amount_available', '>', 0)
-            ->where(function($query) {
-                $query->whereNull('expires_at')->orWhere('expires_at', '>', now());
-            })
-            ->orderBy('expires_at', 'asc') // Consome o que expira primeiro
-            ->first();
+        // Inteligência de Consumo: Busca lote ativo (organização ou direto)
+        $validBatch = $this->findConsumableBatch($tenant, $orgId);
 
         if (!$validBatch) {
             return response()->json(['error' => 'Saldo insuficiente. A organização precisa adquirir créditos.'], 402);
@@ -825,8 +817,15 @@ class EntityController extends Controller
     {
         $orgIds = $tenant->organizations()->pluck('organizations.id')->all();
 
-        if (in_array($entity->organization_id, $orgIds)) {
+        if ($entity->organization_id && in_array($entity->organization_id, $orgIds)) {
             return true;
+        }
+
+        if (!$entity->organization_id && $entity->credit_batch_id) {
+            $batch = CreditBatch::find($entity->credit_batch_id);
+            if ($batch && $batch->recipient_tenant_id === $tenant->id) {
+                return true;
+            }
         }
 
         if (!$entity->space_id) {
@@ -958,5 +957,50 @@ class EntityController extends Controller
         return EntityEmergencyDeclaration::where('entity_id', $entity->id)
             ->where('declared_at', '>', now()->subHours(EntityEmergencyDeclaration::ACTIVE_WINDOW_HOURS))
             ->exists();
+    }
+
+    /**
+     * Retorna a quantidade de créditos disponíveis (organização + diretos).
+     */
+    private function availableCredits($tenant, ?int $orgId): int
+    {
+        return CreditBatch::where('status', 'active')
+            ->where(function($query) {
+                $query->whereNull('expires_at')->orWhere('expires_at', '>', now());
+            })
+            ->where(function($query) use ($tenant, $orgId) {
+                if ($orgId) {
+                    $query->where('organization_id', $orgId);
+                }
+                $query->orWhere(function($sub) use ($tenant) {
+                    $sub->where('recipient_tenant_id', $tenant->id)
+                        ->whereNull('organization_id');
+                });
+            })
+            ->sum('amount_available');
+    }
+
+    /**
+     * Retorna o primeiro lote consumível (organização ou direto),
+     * priorizando o que expira primeiro.
+     */
+    private function findConsumableBatch($tenant, ?int $orgId): ?CreditBatch
+    {
+        return CreditBatch::where('status', 'active')
+            ->where('amount_available', '>', 0)
+            ->where(function($query) {
+                $query->whereNull('expires_at')->orWhere('expires_at', '>', now());
+            })
+            ->where(function($query) use ($tenant, $orgId) {
+                if ($orgId) {
+                    $query->where('organization_id', $orgId);
+                }
+                $query->orWhere(function($sub) use ($tenant) {
+                    $sub->where('recipient_tenant_id', $tenant->id)
+                        ->whereNull('organization_id');
+                });
+            })
+            ->orderBy('expires_at', 'asc')
+            ->first();
     }
 }

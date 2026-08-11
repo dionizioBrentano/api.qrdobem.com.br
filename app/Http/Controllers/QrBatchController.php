@@ -63,21 +63,26 @@ class QrBatchController extends Controller
 
         $quantity = (int) $validated['quantity'];
 
+        if (!$space->organization_id) {
+            return response()->json([
+                'error' => 'A geração em lote exige que o espaço esteja vinculado a uma organização.',
+                'code'  => 'ORGANIZATION_REQUIRED_FOR_BATCH',
+            ], 402);
+        }
+
         // Crédito continua pendurado na organização nesta fase.
-        $creditBatch = $space->organization_id
-            ? CreditBatch::where('organization_id', $space->organization_id)
-                ->where('status', 'active')
-                ->where('amount_available', '>=', $quantity)
-                ->where(function ($q) {
-                    $q->whereNull('expires_at')->orWhere('expires_at', '>', now());
-                })
-                ->orderBy('expires_at')
-                ->first()
-            : null;
+        $creditBatch = CreditBatch::where('organization_id', $space->organization_id)
+            ->where('status', 'active')
+            ->where('amount_available', '>=', $quantity)
+            ->where(function ($q) {
+                $q->whereNull('expires_at')->orWhere('expires_at', '>', now());
+            })
+            ->orderBy('expires_at')
+            ->first();
 
         if (!$creditBatch) {
             return response()->json([
-                'error' => "Créditos insuficientes para gerar {$quantity} QR Codes.",
+                'error' => "Créditos da organização insuficientes para gerar {$quantity} QR Codes.",
                 'code'  => 'INSUFFICIENT_CREDITS',
             ], 402);
         }
