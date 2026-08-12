@@ -22,9 +22,10 @@ class NotificationDispatcher
     /** @var array<string, NotificationChannel> */
     private array $channels = [];
 
-    public function __construct(MailChannel $mail, WhatsAppChannel $whatsapp)
+    public function __construct(MailChannel $mail, WhatsAppChannel $whatsapp, PushChannel $push)
     {
         $this->register($mail);
+        $this->register($push);
 
         // O WhatsApp é registrado sempre, mas `isAvailable()` devolve false
         // enquanto o .env não tiver as credenciais da Meta. Nesse estado o

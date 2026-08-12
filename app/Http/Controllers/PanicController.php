@@ -217,39 +217,50 @@ class PanicController extends Controller
         ]);
     }
 
-    /**
-     * Avisa todos os membros do espaço, menos quem acionou.
-     *
-     * O disparo é síncrono nesta versão rústica. Com a fila configurada
-     * (`queue:batch` no cron), o passo natural é mover para job — mas
-     * síncrono agora entrega o alerta hoje, e alerta que chega hoje vale
-     * mais que arquitetura que chega mês que vem.
-     *
-     * @return array<int, array>
-     */
-    private function notifyFamily(Space $space, PanicEvent $event, ?string $triggeredByName): array
+    private function notifyFamily(?Space $space, PanicEvent $event, ?string $triggeredByName): array
     {
-        $memberTenantIds = SpaceMember::where('space_id', $space->id)
-            ->whereNotNull('accepted_at')
-            ->pluck('tenant_id')
-            ->push($space->owner_tenant_id)
-            ->unique()
-            ->reject(fn ($id) => $id === $event->triggered_by_tenant_id)
-            ->values();
+        $memberTenantIds = collect();
+        if ($space) {
+            $memberTenantIds = SpaceMember::where('space_id', $space->id)
+                ->whereNotNull('accepted_at')
+                ->pluck('tenant_id')
+                ->push($space->owner_tenant_id)
+                ->unique()
+                ->reject(fn ($id) => $id === $event->triggered_by_tenant_id)
+                ->values();
+        }
 
         $members = Tenant::whereIn('id', $memberTenantIds)->get();
+        
+        $contactsQuery = \App\Models\EmergencyContact::where('status', 'accepted');
+        if ($space && $event->entity_id) {
+            $contactsQuery->where(function ($q) use ($space, $event) {
+                $q->where('space_id', $space->id)->orWhere('entity_id', $event->entity_id);
+            });
+        } elseif ($space) {
+            $contactsQuery->where('space_id', $space->id);
+        } elseif ($event->entity_id) {
+            $contactsQuery->where('entity_id', $event->entity_id);
+        } else {
+            $contactsQuery->whereRaw('1 = 0');
+        }
+        $emergencyContacts = $contactsQuery->get();
 
-        if ($members->isEmpty()) {
-            Log::warning('PanicController: nenhum destinatário no espaço', ['space_id' => $space->id]);
+        if ($members->isEmpty() && $emergencyContacts->isEmpty()) {
+            Log::warning('PanicController: nenhum destinatário (member ou contact) encontrado', [
+                'space_id' => $space?->id,
+                'entity_id' => $event->entity_id
+            ]);
             return [];
         }
 
         $message = $this->buildMessage($space, $event, $triggeredByName);
-
         $results = [];
 
+        // 1. Notificar Tenants (membros)
         foreach ($members as $member) {
             $destinations = array_filter([
+                'push'     => $member->push_subscription ? json_encode($member->push_subscription) : null,
                 'mail'     => $member->email,
                 'whatsapp' => $member->phone, // ignorado até o canal existir
             ]);
@@ -258,16 +269,16 @@ class PanicController extends Controller
                 continue;
             }
 
-            $result = $this->dispatcher->sendVia($destinations, self::CHANNEL_ORDER, $message);
+            $result = $this->dispatcher->sendVia($destinations, ['push', 'mail', 'whatsapp'], $message);
 
             PanicRecipient::create([
                 'panic_event_id' => $event->id,
                 'tenant_id'      => $member->id,
-                'channel'        => $result->channel,
-                'destination'    => $result->to,
+                'channel'        => $result->channel ?? 'mail', // fallback para não dar null erro
+                'destination'    => $result->to ?? $member->email,
                 'status'         => $result->success ? 'sent' : 'failed',
-                'provider_id'    => $result->providerId,
-                'error'          => $result->error,
+                'provider_id'    => $result->providerId ?? null,
+                'error'          => $result->error ?? null,
                 'sent_at'        => $result->success ? now() : null,
             ]);
 
@@ -277,6 +288,63 @@ class PanicController extends Controller
                 'channel'   => $result->channel,
                 'success'   => $result->success,
             ];
+        }
+
+        // 2. Notificar Emergency Contacts
+        foreach ($emergencyContacts as $contact) {
+            if ($contact->push_subscription || $contact->email) {
+                
+                $destinations = array_filter([
+                    'push' => $contact->push_subscription ? json_encode($contact->push_subscription) : null,
+                    'mail' => $contact->email,
+                ]);
+                
+                $result = $this->dispatcher->sendVia($destinations, ['push', 'mail'], $message);
+                $success = $result->success;
+                $channel = $result->channel;
+                $error = $result->error;
+                
+                PanicRecipient::create([
+                    'panic_event_id' => $event->id,
+                    'tenant_id'      => $contact->linked_tenant_id, // pode ser null
+                    'channel'        => $channel,
+                    'destination'    => $result->to ?? ($contact->email ?? 'unknown'),
+                    'status'         => $success ? 'sent' : 'failed',
+                    'provider_id'    => null,
+                    'error'          => $error,
+                    'sent_at'        => $success ? now() : null,
+                ]);
+
+                $results[] = [
+                    'contact_id' => $contact->id,
+                    'name'       => $contact->name,
+                    'channel'    => $channel,
+                    'success'    => $success,
+                ];
+            } else {
+                // Sem subscription. E-mail só se existir explícito.
+                if ($contact->email) {
+                    $destinations = ['mail' => $contact->email];
+                    $result = $this->dispatcher->sendVia($destinations, ['mail'], $message);
+                    
+                    PanicRecipient::create([
+                        'panic_event_id' => $event->id,
+                        'tenant_id'      => $contact->linked_tenant_id,
+                        'channel'        => 'mail',
+                        'destination'    => $contact->email,
+                        'status'         => $result->success ? 'sent' : 'failed',
+                        'error'          => $result->error,
+                        'sent_at'        => $result->success ? now() : null,
+                    ]);
+
+                    $results[] = [
+                        'contact_id' => $contact->id,
+                        'name'       => $contact->name,
+                        'channel'    => 'mail',
+                        'success'    => $result->success,
+                    ];
+                }
+            }
         }
 
         return $results;

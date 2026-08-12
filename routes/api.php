@@ -202,6 +202,24 @@ Route::middleware('auth.firebase')->group(function () {
     Route::post('/credits/checkout/card', [CreditController::class, 'checkoutCard']);
     Route::get('/credits/orders/{id}', [CreditController::class, 'showOrder']);
     Route::put('/admin/credits/pricing', [AdminController::class, 'updatePricing']);
+
+    // --- Contatos de Emergência (Independente de Tenant) ---
+    Route::get('/emergency-contacts', [\App\Http\Controllers\EmergencyContactController::class, 'index']);
+    Route::post('/emergency-contacts', [\App\Http\Controllers\EmergencyContactController::class, 'store']);
+    Route::delete('/emergency-contacts/{id}', [\App\Http\Controllers\EmergencyContactController::class, 'destroy']);
+    Route::post('/emergency-contacts/{id}/resend-invite', [\App\Http\Controllers\EmergencyContactController::class, 'resendInvite']);
+});
+
+// --- Contatos de Emergência Públicos (Aceite e Push) ---
+Route::get('/emergency-contact-invites/{token}', [\App\Http\Controllers\EmergencyContactInviteController::class, 'show']);
+Route::post('/emergency-contact-invites/{token}/accept', [\App\Http\Controllers\EmergencyContactInviteController::class, 'accept']);
+Route::post('/emergency-contact-invites/{token}/push-subscription', [\App\Http\Controllers\EmergencyContactInviteController::class, 'savePushSubscription']);
+
+// VAPID Public Key sem auth
+Route::get('/push/public-key', function () {
+    return response()->json([
+        'publicKey' => env('VAPID_PUBLIC_KEY')
+    ]);
 });
 
 // --- Mapa de calor (Fase 6, T2-R07) — DESATIVADO em 06/08/2026 ---
