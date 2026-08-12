@@ -60,6 +60,11 @@ class Entity extends Model
         return $this->belongsTo(Organization::class);
     }
 
+    public function creditBatch(): BelongsTo
+    {
+        return $this->belongsTo(CreditBatch::class, 'credit_batch_id');
+    }
+
     /** Espaço de trilha ao qual a entidade pertence (F1). */
     public function space(): BelongsTo
     {
