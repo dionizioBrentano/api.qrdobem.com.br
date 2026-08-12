@@ -20,6 +20,9 @@ class PanicEvent extends Model
     public const SOURCE_QR     = 'qr';
     public const SOURCE_MANUAL = 'manual';
 
+    /** Tempo que o pânico libera dados automaticamente na leitura pública. */
+    public const ACTIVE_WINDOW_HOURS = 24;
+
     protected $fillable = [
         'space_id',
         'entity_id',

@@ -12,6 +12,7 @@ use App\Http\Requests\EntityUpdateRequest;
 use App\Models\CreditBatch;
 use App\Models\HeatmapCell;
 use App\Models\Organization;
+use App\Models\PanicEvent;
 use App\Models\Space;
 use App\Models\SpaceMember;
 use App\Models\TenantTermAcceptance;
@@ -643,6 +644,7 @@ class EntityController extends Controller
             'health_info' => $this->publicHealthInfo($entity),
             'pet_info' => $entity->type === 'pet' ? $this->publicPetInfo($entity) : null,
             'object_info' => $entity->type === 'object' ? $this->publicObjectInfo($entity) : null,
+            'has_active_emergency' => $this->hasActiveEmergency($entity),
             'organization' => $entity->organization ? $entity->organization->name : 'Organização Desconhecida',
             // White-label e patrocínio (Fase 5, T3-R02/T3-R03).
             'branding' => $this->branding($entity),
@@ -950,12 +952,22 @@ class EntityController extends Controller
     }
 
     /**
-     * Emergência ativa = declaração feita dentro da janela de validade.
+     * Emergência ativa = declaração feita dentro da janela de validade OU
+     * botão de pânico acionado na janela de validade (Fase 2).
      */
     private function hasActiveEmergency(Entity $entity): bool
     {
-        return EntityEmergencyDeclaration::where('entity_id', $entity->id)
+        $hasDeclaration = EntityEmergencyDeclaration::where('entity_id', $entity->id)
             ->where('declared_at', '>', now()->subHours(EntityEmergencyDeclaration::ACTIVE_WINDOW_HOURS))
+            ->exists();
+
+        if ($hasDeclaration) {
+            return true;
+        }
+
+        return PanicEvent::where('entity_id', $entity->id)
+            ->where('status', 'open')
+            ->where('triggered_at', '>', now()->subHours(PanicEvent::ACTIVE_WINDOW_HOURS))
             ->exists();
     }
 

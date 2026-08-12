@@ -102,15 +102,11 @@ class PanicController extends Controller
             ->where('status', 'active')
             ->first();
 
-        if (!$entity || !$entity->space_id) {
+        if (!$entity) {
             return response()->json(['error' => 'Registro não encontrado.'], 404);
         }
 
-        $space = Space::find($entity->space_id);
-
-        if (!$space) {
-            return response()->json(['error' => 'Registro não encontrado.'], 404);
-        }
+        $space = $entity->space_id ? Space::find($entity->space_id) : null;
 
         $validated = $request->validate([
             'latitude'          => 'sometimes|nullable|numeric|between:-90,90',
@@ -123,14 +119,20 @@ class PanicController extends Controller
 
         $event = $this->createEvent($space, $validated, PanicEvent::SOURCE_QR, null);
 
-        $results = $this->notifyFamily($space, $event, 'alguém que leu o QR Code');
+        $results = $space ? $this->notifyFamily($space, $event, 'alguém que leu o QR Code') : [];
+        $notified = collect($results)->where('success', true)->isNotEmpty();
+
+        $message = $notified 
+            ? 'Alerta enviado aos contatos. Dados liberados para o socorro. Se houver risco de vida, ligue 192 (SAMU) ou 190 (Polícia).' 
+            : 'Dados liberados para o socorro. Nenhum contato configurado para aviso. Se houver risco de vida, ligue 192 (SAMU) ou 190 (Polícia).';
 
         // A resposta pública não revela quem foi avisado nem quantos são:
         // isso mapearia a família para um estranho.
         return response()->json([
-            'message'  => 'Alerta enviado à família. Se houver risco de vida, ligue 192 (SAMU) ou 190 (Polícia).',
-            'event_id' => $event->id,
-            'notified' => collect($results)->where('success', true)->isNotEmpty(),
+            'message'            => $message,
+            'event_id'           => $event->id,
+            'emergency_unlocked' => true,
+            'notified'           => $notified,
         ], 201);
     }
 
@@ -199,10 +201,10 @@ class PanicController extends Controller
      * Feito antes de qualquer envio, de propósito: mesmo que toda a
      * notificação falhe, fica o registro de que alguém pediu socorro.
      */
-    private function createEvent(Space $space, array $data, string $source, ?Tenant $tenant): PanicEvent
+    private function createEvent(?Space $space, array $data, string $source, ?Tenant $tenant): PanicEvent
     {
         return PanicEvent::create([
-            'space_id'               => $space->id,
+            'space_id'               => $space?->id,
             'entity_id'              => $data['entity_id'] ?? null,
             'triggered_by_tenant_id' => $tenant?->id,
             'source'                 => $source,
