@@ -106,7 +106,7 @@ class AdminController extends Controller
             'tenant_id' => 'required|exists:tenants,id',
             'organization_id' => 'nullable|exists:organizations,id',
             'amount' => 'required|integer|min:1',
-            'expires_at' => 'nullable|date|after:today',
+            'expires_at' => 'nullable|date|after_or_equal:today',
             'note' => 'nullable|string',
         ]);
 
