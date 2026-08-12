@@ -19,11 +19,22 @@ class EntityEmergencyDeclaration extends Model
         'entity_id',
         'declarant_cpf_encrypted',
         'declared_at',
+        'latitude',
+        'longitude',
+        'location_accuracy',
+        'note',
+        'ip',
+        'user_agent',
+        'status',
+        'resolved_at',
     ];
 
     protected $casts = [
         'declarant_cpf_encrypted' => 'encrypted',
         'declared_at' => 'datetime',
+        'resolved_at' => 'datetime',
+        'latitude' => 'decimal:8',
+        'longitude' => 'decimal:8',
     ];
 
     protected $hidden = [
@@ -33,5 +44,13 @@ class EntityEmergencyDeclaration extends Model
     public function entity(): BelongsTo
     {
         return $this->belongsTo(Entity::class);
+    }
+
+    public function mapsUrl(): ?string
+    {
+        if ($this->latitude && $this->longitude) {
+            return "https://www.google.com/maps/search/?api=1&query={$this->latitude},{$this->longitude}";
+        }
+        return null;
     }
 }

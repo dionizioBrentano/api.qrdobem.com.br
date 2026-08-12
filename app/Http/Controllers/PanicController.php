@@ -13,6 +13,7 @@ use App\Services\Notification\NotificationDispatcher;
 use App\Services\Notification\NotificationMessage;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\RateLimiter;
 
 /**
  * PanicController — Botão de Pânico.
@@ -115,6 +116,19 @@ class PanicController extends Controller
             'note'              => 'sometimes|nullable|string|max:500',
         ]);
 
+        $rateLimitKey = 'panic_public_' . $entity->id . '_' . $request->ip();
+
+        if (RateLimiter::tooManyAttempts($rateLimitKey, 3)) {
+            return response()->json([
+                'message'            => 'Alerta já registrado. Dados de socorro permanecem disponíveis nesta página.',
+                'event_id'           => null,
+                'emergency_unlocked' => true,
+                'notified'           => false,
+            ], 201);
+        }
+
+        RateLimiter::hit($rateLimitKey, 900); // 15 minutos
+
         $validated['entity_id'] = $entity->id;
 
         $event = $this->createEvent($space, $validated, PanicEvent::SOURCE_QR, null);
@@ -153,24 +167,66 @@ class PanicController extends Controller
             ->limit(50)
             ->get();
 
+        $declarations = \App\Models\EntityEmergencyDeclaration::whereIn('entity_id', $space->entities()->pluck('id'))
+            ->orderByDesc('declared_at')
+            ->limit(50)
+            ->get();
+
+        $eventsList = $events->map(fn (PanicEvent $e) => [
+            'id'           => $e->id,
+            'source'       => $e->source,
+            'status'       => $e->status,
+            'triggered_at' => $e->triggered_at,
+            'resolved_at'  => $e->resolved_at,
+            'note'         => $e->note,
+            'maps_url'     => $e->mapsUrl(),
+            'notified'     => $e->recipients->where('status', 'sent')->count(),
+            'failed'       => $e->recipients->where('status', 'failed')->count(),
+        ]);
+
+        $declList = $declarations->map(fn ($d) => [
+            'id'           => 'decl_' . $d->id,
+            'source'       => 'qr_declare',
+            'status'       => $d->status ?? 'open',
+            'triggered_at' => $d->declared_at,
+            'resolved_at'  => $d->resolved_at,
+            'note'         => $d->note,
+            'maps_url'     => $d->mapsUrl(),
+            'notified'     => 1,
+            'failed'       => 0,
+        ]);
+
+        $allEvents = $eventsList->concat($declList)
+            ->sortByDesc('triggered_at')
+            ->take(50)
+            ->values();
+
         return response()->json([
-            'events' => $events->map(fn (PanicEvent $e) => [
-                'id'           => $e->id,
-                'source'       => $e->source,
-                'status'       => $e->status,
-                'triggered_at' => $e->triggered_at,
-                'resolved_at'  => $e->resolved_at,
-                'note'         => $e->note,
-                'maps_url'     => $e->mapsUrl(),
-                'notified'     => $e->recipients->where('status', 'sent')->count(),
-                'failed'       => $e->recipients->where('status', 'failed')->count(),
-            ])->values(),
+            'events' => $allEvents,
         ]);
     }
 
     /** POST /panic/{event}/resolve  { false_alarm? } */
     public function resolve(Request $request, $eventId)
     {
+        if (str_starts_with($eventId, 'decl_')) {
+            $declId = substr($eventId, 5);
+            $decl = \App\Models\EntityEmergencyDeclaration::find($declId);
+            if (!$decl) return response()->json(['error' => 'Declaração não encontrada.'], 404);
+            $space = Space::find($decl->entity->space_id);
+            if (!$space) return response()->json(['error' => 'Espaço não encontrado.'], 404);
+            app(SpacePolicy::class)->authorize($request->tenant, $space, 'panic.configure');
+            
+            $decl->update([
+                'status' => $request->boolean('false_alarm') ? 'false_alarm' : 'resolved',
+                'resolved_at' => now(),
+            ]);
+            return response()->json([
+                'message' => 'Alerta encerrado.',
+                'status'  => $decl->status,
+            ]);
+        }
+
         $event = PanicEvent::find($eventId);
 
         if (!$event) {

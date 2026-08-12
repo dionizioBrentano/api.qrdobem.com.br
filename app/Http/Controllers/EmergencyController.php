@@ -7,16 +7,15 @@ use App\Models\AuditLog;
 use App\Models\Entity;
 use App\Models\EntityEmergencyDeclaration;
 use App\Models\Tenant;
-use App\Services\CpfValidator;
 use App\Services\QrCodeService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\RateLimiter;
 
 class EmergencyController extends Controller
 {
     public function __construct(
-        private CpfValidator $cpf,
         private QrCodeService $qrCode
     ) {
     }
@@ -38,19 +37,33 @@ class EmergencyController extends Controller
         }
 
         $request->validate([
-            'declarant_cpf' => 'required|string',
+            'latitude' => 'nullable|numeric',
+            'longitude' => 'nullable|numeric',
+            'location_accuracy' => 'nullable|string',
+            'note' => 'nullable|string',
         ]);
 
-        $cpfClean = preg_replace('/\D/', '', $request->input('declarant_cpf'));
+        $rateLimitKey = 'emergency_declare_' . $entity->id . '_' . $request->ip();
 
-        if (!$this->cpf->isValid($cpfClean)) {
-            return response()->json(['error' => 'CPF inválido.'], 422);
+        if (RateLimiter::tooManyAttempts($rateLimitKey, 3)) {
+            return response()->json([
+                'message' => 'Alerta já registrado. Dados de socorro permanecem disponíveis nesta página.',
+                'declared_at' => now(),
+                'emergency_unlocked' => true,
+            ], 201);
         }
+
+        RateLimiter::hit($rateLimitKey, 900); // 15 minutos
 
         $declaration = EntityEmergencyDeclaration::create([
             'entity_id' => $entity->id,
-            'declarant_cpf_encrypted' => $cpfClean,
             'declared_at' => now(),
+            'latitude' => $request->input('latitude'),
+            'longitude' => $request->input('longitude'),
+            'location_accuracy' => $request->input('location_accuracy'),
+            'note' => $request->input('note'),
+            'ip' => $request->ip(),
+            'user_agent' => $request->userAgent(),
         ]);
 
         $this->notifyOwner($entity);
@@ -58,6 +71,7 @@ class EmergencyController extends Controller
         return response()->json([
             'message' => 'Emergência declarada. O responsável foi notificado.',
             'declared_at' => $declaration->declared_at,
+            'emergency_unlocked' => true,
         ], 201);
     }
 

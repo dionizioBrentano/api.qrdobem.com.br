@@ -960,6 +960,7 @@ class EntityController extends Controller
     private function hasActiveEmergency(Entity $entity): bool
     {
         $hasDeclaration = EntityEmergencyDeclaration::where('entity_id', $entity->id)
+            ->where('status', 'open')
             ->where('declared_at', '>', now()->subHours(EntityEmergencyDeclaration::ACTIVE_WINDOW_HOURS))
             ->exists();
 
