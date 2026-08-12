@@ -939,15 +939,17 @@ class EntityController extends Controller
      */
     private function publicHealthInfo(Entity $entity)
     {
-        // Sob emergência declarada, tudo aparece — inclusive os sempre-restritos
-        // e o contato do cuidador, independente de is_public.
+        // Contatos pessoais (caregiver_contact) NUNCA são expostos na página pública,
+        // nem mesmo sob emergência, para forçar o uso do chat anônimo e garantir privacidade.
         if ($this->hasActiveEmergency($entity)) {
-            return $entity->healthFields->pluck('field_value', 'field_key');
+            return $entity->healthFields
+                ->where('field_key', '!=', 'caregiver_contact')
+                ->pluck('field_value', 'field_key');
         }
 
         return $entity->healthFields
             ->where('is_public', true)
-            ->where('field_key', '!=', EntityHealthField::NEVER_PUBLIC_IN_NORMAL_VIEW)
+            ->where('field_key', '!=', 'caregiver_contact')
             ->pluck('field_value', 'field_key');
     }
 
