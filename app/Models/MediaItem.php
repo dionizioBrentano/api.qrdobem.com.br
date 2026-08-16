@@ -25,6 +25,7 @@ class MediaItem extends Model
 
     public const OWNER_SPACE        = 'space';
     public const OWNER_DISBURSEMENT = 'disbursement';
+    public const OWNER_ENTITY       = 'entity';
 
     /** Tipos aceitos. Lista fechada: o que não está aqui é recusado. */
     public const ALLOWED_MIMES = [

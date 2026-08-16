@@ -180,6 +180,11 @@ Route::middleware('auth.firebase')->group(function () {
     Route::post('/entities/{unique_code}/vaccinations', [EntityController::class, 'addVaccination']);
     Route::get('/entities/{unique_code}/reads', [EntityController::class, 'reads']);
     Route::delete('/entities/{unique_code}', [EntityController::class, 'destroy']);
+    
+    // Mídia da entidade (Fase 3/P3-02)
+    Route::post('/entities/{unique_code}/media', [EntityController::class, 'storeMedia']);
+    Route::get('/entities/{unique_code}/media', [EntityController::class, 'listMedia']);
+    Route::delete('/entities/{unique_code}/media/{mediaId}', [EntityController::class, 'destroyMedia']);
 
     // Decifragem do CPF de quem declarou emergência (superadmin, auditado)
     Route::get('/admin/emergency-declarations/{id}/reveal', [EmergencyController::class, 'reveal']);

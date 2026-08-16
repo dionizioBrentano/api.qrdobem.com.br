@@ -1190,4 +1190,127 @@ class EntityController extends Controller
             ->orderBy('expires_at', 'asc')
             ->first();
     }
+
+    /** POST /entities/{unique_code}/media */
+    public function storeMedia(Request $request, $unique_code)
+    {
+        $tenant = $request->tenant;
+        $entity = Entity::where('unique_code', $unique_code)->first();
+
+        if (!$entity || !$this->canAccessEntity($tenant, $entity)) {
+            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
+        }
+
+        $request->validate([
+            'file'    => 'required|file|max:' . (\App\Models\MediaItem::MAX_SIZE_BYTES / 1024),
+            'caption' => 'sometimes|nullable|string|max:500',
+        ]);
+
+        $file = $request->file('file');
+        $mime = $file->getMimeType();
+
+        if (!in_array($mime, \App\Models\MediaItem::ALLOWED_MIMES, true)) {
+            return response()->json([
+                'error'    => 'Tipo de arquivo não aceito. Envie JPG, PNG, WEBP ou MP4.',
+                'code'     => 'INVALID_MIME',
+                'received' => $mime,
+            ], 422);
+        }
+
+        $extension = match ($mime) {
+            'image/jpeg'      => 'jpg',
+            'image/png'       => 'png',
+            'image/webp'      => 'webp',
+            'video/mp4'       => 'mp4',
+            'video/quicktime' => 'mov',
+            default           => 'bin',
+        };
+
+        $filename  = \Illuminate\Support\Str::uuid() . '.' . $extension;
+        $path      = "entities/{$entity->id}/{$filename}";
+
+        \Illuminate\Support\Facades\Storage::disk('private')->putFileAs("entities/{$entity->id}", $file, $filename);
+
+        $media = \App\Models\MediaItem::create([
+            'owner_type'            => \App\Models\MediaItem::OWNER_ENTITY,
+            'owner_id'              => $entity->id,
+            'uploaded_by_tenant_id' => $tenant->id,
+            'path'                  => $path,
+            'mime_type'             => $mime,
+            'size_bytes'            => $file->getSize(),
+            'caption'               => $request->input('caption'),
+            'status'                => 'pending',
+        ]);
+
+        \Illuminate\Support\Facades\Log::info("Mídia {$media->id} enviada para entidade {$entity->unique_code} pelo tenant {$tenant->id}");
+
+        return response()->json([
+            'message' => 'Arquivo enviado. Ficará visível depois da revisão.',
+            'media'   => [
+                'id'       => $media->id,
+                'status'   => $media->status,
+                'caption'  => $media->caption,
+                'is_video' => $media->isVideo(),
+            ],
+        ], 201);
+    }
+
+    /** GET /entities/{unique_code}/media */
+    public function listMedia(Request $request, $unique_code)
+    {
+        $tenant = $request->tenant;
+        $entity = Entity::where('unique_code', $unique_code)->first();
+
+        if (!$entity || !$this->canAccessEntity($tenant, $entity)) {
+            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
+        }
+
+        $media = \App\Models\MediaItem::where('owner_type', \App\Models\MediaItem::OWNER_ENTITY)
+            ->where('owner_id', $entity->id)
+            ->orderByDesc('id')
+            ->get();
+
+        return response()->json([
+            'media' => $media->map(fn (\App\Models\MediaItem $m) => [
+                'id'               => $m->id,
+                'status'           => $m->status,
+                'caption'          => $m->caption,
+                'is_video'         => $m->isVideo(),
+                'size_bytes'       => $m->size_bytes,
+                'rejection_reason' => $m->rejection_reason,
+                'url'              => url("/api/media/{$m->id}"),
+                'created_at'       => $m->created_at,
+            ])->values(),
+            'pending_count' => $media->where('status', 'pending')->count(),
+        ]);
+    }
+
+    /** DELETE /entities/{unique_code}/media/{mediaId} */
+    public function destroyMedia(Request $request, $unique_code, $mediaId)
+    {
+        $tenant = $request->tenant;
+        $entity = Entity::where('unique_code', $unique_code)->first();
+
+        if (!$entity || !$this->canAccessEntity($tenant, $entity)) {
+            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
+        }
+
+        $media = \App\Models\MediaItem::find($mediaId);
+
+        if (!$media || $media->owner_type !== \App\Models\MediaItem::OWNER_ENTITY || $media->owner_id !== $entity->id) {
+            return response()->json(['error' => 'Mídia não encontrada.'], 404);
+        }
+
+        try {
+            \Illuminate\Support\Facades\Storage::disk('private')->delete($media->path);
+        } catch (\Throwable $e) {
+            // Ignorar erro se o arquivo já não existir
+        }
+
+        $media->delete();
+
+        \Illuminate\Support\Facades\Log::info("Mídia {$media->id} removida da entidade {$entity->unique_code} pelo tenant {$tenant->id}");
+
+        return response()->json(['message' => 'Mídia removida.']);
+    }
 }

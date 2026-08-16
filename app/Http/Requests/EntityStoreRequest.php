@@ -25,6 +25,7 @@ class EntityStoreRequest extends FormRequest
             'contact_email' => 'nullable|email|max:255',
             'medical_info' => 'nullable|string',
             'additional_info' => 'nullable|string',
+            'intent' => 'nullable|string',
 
             'health_fields' => 'nullable|array',
             'health_fields.*.field_key' => 'required|string|in:' . implode(',', EntityHealthField::FIELD_KEYS),
@@ -74,6 +75,20 @@ class EntityStoreRequest extends FormRequest
     public function withValidator(Validator $validator): void
     {
         $validator->after(function (Validator $validator) {
+            if ($this->input('type') === 'person' && $this->input('intent') === 'aventura') {
+                $tenant = $this->tenant ?? request()->tenant;
+                $hasContact = \App\Models\EmergencyContact::where('owner_tenant_id', $tenant->id)
+                    ->whereIn('status', ['accepted', 'pending'])
+                    ->exists();
+
+                if (!$hasContact) {
+                    $validator->errors()->add(
+                        'intent',
+                        'Para gerar a identidade de emergência, você precisa cadastrar pelo menos 1 contato de emergência.'
+                    );
+                }
+            }
+
             foreach ((array) $this->input('health_fields', []) as $index => $field) {
                 $key = $field['field_key'] ?? null;
 

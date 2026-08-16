@@ -111,4 +111,10 @@ class Entity extends Model
     {
         return $this->hasMany(EntityRead::class);
     }
+
+    public function media(): HasMany
+    {
+        return $this->hasMany(MediaItem::class, 'owner_id')
+                    ->where('owner_type', MediaItem::OWNER_ENTITY);
+    }
 }
