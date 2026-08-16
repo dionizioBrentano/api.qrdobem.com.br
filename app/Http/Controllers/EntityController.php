@@ -1239,13 +1239,13 @@ class EntityController extends Controller
             'mime_type'             => $mime,
             'size_bytes'            => $file->getSize(),
             'caption'               => $request->input('caption'),
-            'status'                => 'pending',
+            'status'                => 'approved',
         ]);
 
         \Illuminate\Support\Facades\Log::info("Mídia {$media->id} enviada para entidade {$entity->unique_code} pelo tenant {$tenant->id}");
 
         return response()->json([
-            'message' => 'Arquivo enviado. Ficará visível depois da revisão.',
+            'message' => 'Arquivo enviado e disponível.',
             'media'   => [
                 'id'       => $media->id,
                 'status'   => $media->status,
