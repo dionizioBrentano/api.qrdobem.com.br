@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\EntityRead;
 use App\Models\Entity;
+use App\Models\EntityAlert;
 use Illuminate\Support\Facades\Log;
 
 class EntityReadProcessor
@@ -35,19 +36,16 @@ class EntityReadProcessor
             ->count();
 
         if ($recentReadsCount >= 5) {
-            $recentAlert = \Illuminate\Support\Facades\DB::table('entity_alerts')
-                ->where('entity_id', $entity->id)
+            $recentAlert = EntityAlert::where('entity_id', $entity->id)
                 ->where('type', 'read_spike')
                 ->where('created_at', '>=', now()->subMinutes(15))
                 ->exists();
 
             if (!$recentAlert) {
-                \Illuminate\Support\Facades\DB::table('entity_alerts')->insert([
+                EntityAlert::create([
                     'entity_id' => $entity->id,
                     'type' => 'read_spike',
-                    'payload' => json_encode(['reads_count' => $recentReadsCount]),
-                    'created_at' => now(),
-                    'updated_at' => now(),
+                    'payload' => ['reads_count' => $recentReadsCount],
                 ]);
             }
         }
@@ -60,19 +58,16 @@ class EntityReadProcessor
             ->count();
 
         if ($countReadsToday === 1) {
-            $recentAlert = \Illuminate\Support\Facades\DB::table('entity_alerts')
-                ->where('entity_id', $entity->id)
+            $recentAlert = EntityAlert::where('entity_id', $entity->id)
                 ->where('type', 'first_read_today')
                 ->whereDate('created_at', now()->toDateString())
                 ->exists();
 
             if (!$recentAlert) {
-                \Illuminate\Support\Facades\DB::table('entity_alerts')->insert([
+                EntityAlert::create([
                     'entity_id' => $entity->id,
                     'type' => 'first_read_today',
-                    'payload' => json_encode(['read_at' => $read->read_at->toIso8601String()]),
-                    'created_at' => now(),
-                    'updated_at' => now(),
+                    'payload' => ['read_at' => $read->read_at->toIso8601String()],
                 ]);
             }
         }

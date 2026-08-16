@@ -112,6 +112,11 @@ class Entity extends Model
         return $this->hasMany(EntityRead::class);
     }
 
+    public function entityAlerts(): HasMany
+    {
+        return $this->hasMany(EntityAlert::class);
+    }
+
     public function media(): HasMany
     {
         return $this->hasMany(MediaItem::class, 'owner_id')

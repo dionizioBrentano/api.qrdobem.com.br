@@ -761,10 +761,19 @@ class EntityController extends Controller
             return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
         }
 
-        $alerts = \Illuminate\Support\Facades\DB::table('entity_alerts')
-            ->where('entity_id', $entity->id)
+        $alerts = \App\Models\EntityAlert::where('entity_id', $entity->id)
             ->orderBy('created_at', 'desc')
             ->get();
+
+        // Mapear para garantir que payload e datas estão corretos
+        $alerts->transform(function ($alert) {
+            return [
+                'id' => $alert->id,
+                'type' => $alert->type,
+                'payload' => $alert->payload,
+                'created_at' => $alert->created_at ? $alert->created_at->toIso8601String() : null,
+            ];
+        });
 
         return response()->json(['alerts' => $alerts]);
     }
