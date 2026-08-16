@@ -114,6 +114,7 @@ class EntityController extends Controller
                 return [
                     'unique_code' => $e->unique_code,
                     'type' => $e->type,
+                    'qr_caption' => $e->qr_caption,
                     'name' => $e->encrypted_name,
                     'url' => $this->qrCode->urlFor($e->unique_code),
                     // Endpoint do QR: o frontend não precisa saber gerar imagem.
@@ -210,6 +211,24 @@ class EntityController extends Controller
             ], 422);
         }
 
+        $qrCaption = $request->input('qr_caption');
+        
+        if (empty(trim((string)$qrCaption))) {
+            $qrCaption = match ($entityType) {
+                'person' => 'Em caso de emergência, escaneie.',
+                'pet' => 'Estou perdido! Escaneie para falar com minha família.',
+                'object' => 'Se encontrou este item, escaneie o QR Code.',
+                default => null,
+            };
+        }
+
+        if (app(PiiDetector::class)->containsContact($qrCaption)) {
+            return response()->json([
+                'error' => 'A legenda pública não pode conter telefone ou e-mail. Por segurança, o contato acontece apenas pelo QR Code.',
+                'code' => 'CONTACT_DETECTED',
+            ], 422);
+        }
+
         $uniqueCode = (string) Str::uuid();
 
         $entity = Entity::create([
@@ -220,6 +239,7 @@ class EntityController extends Controller
             'credit_batch_id' => $validBatch->id,
             'unique_code' => $uniqueCode,
             'type' => $request->type,
+            'qr_caption' => $qrCaption,
             'encrypted_name' => $request->name,
             'encrypted_contact_phone' => $request->contact_phone,
             'encrypted_contact_email' => $request->contact_email,
@@ -337,6 +357,18 @@ class EntityController extends Controller
             $validBatch->update(['status' => 'exhausted']);
         }
 
+        AuditLog::create([
+            'entity_id' => $entity->id,
+            'ip_address' => $request->ip(),
+            'user_agent' => $request->userAgent(),
+            'accessed_at' => now(),
+            'location_data' => [
+                'action' => 'create',
+                'tenant_id' => $tenant->id,
+                'unique_code' => $uniqueCode
+            ],
+        ]);
+
         return response()->json([
             'message' => 'Entidade registrada com sucesso.',
             'unique_code' => $uniqueCode,
@@ -363,6 +395,7 @@ class EntityController extends Controller
         return response()->json([
             'unique_code' => $entity->unique_code,
             'type' => $entity->type,
+            'qr_caption' => $entity->qr_caption,
             'name' => $entity->encrypted_name,
             'contact_phone' => $entity->encrypted_contact_phone,
             'contact_email' => $entity->encrypted_contact_email,
@@ -401,7 +434,34 @@ class EntityController extends Controller
 
         $entityType = $entity->type;
 
+        $qrCaption = $request->input('qr_caption');
+        
+        if (empty(trim((string)$qrCaption))) {
+            $qrCaption = match ($entityType) {
+                'person' => 'Em caso de emergência, escaneie.',
+                'pet' => 'Estou perdido! Escaneie para falar com minha família.',
+                'object' => 'Se encontrou este item, escaneie o QR Code.',
+                default => null,
+            };
+        }
+
+        if (app(PiiDetector::class)->containsContact($qrCaption)) {
+            return response()->json([
+                'error' => 'A legenda pública não pode conter telefone ou e-mail. Por segurança, o contato acontece apenas pelo QR Code.',
+                'code' => 'CONTACT_DETECTED',
+            ], 422);
+        }
+
+        $publicLabel = $request->input('object_fields.public_label');
+        if ($entityType === 'object' && app(PiiDetector::class)->containsContact($publicLabel)) {
+            return response()->json([
+                'error' => 'O texto público não pode conter telefone ou e-mail. Por segurança, o contato acontece apenas pelo QR Code.',
+                'code' => 'CONTACT_DETECTED',
+            ], 422);
+        }
+
         $entity->update([
+            'qr_caption' => $qrCaption,
             'encrypted_name' => $request->name,
             'encrypted_contact_phone' => $request->contact_phone,
             'encrypted_contact_email' => $request->contact_email,
@@ -508,10 +568,51 @@ class EntityController extends Controller
             );
         }
 
+        AuditLog::create([
+            'entity_id' => $entity->id,
+            'ip_address' => $request->ip(),
+            'user_agent' => $request->userAgent(),
+            'accessed_at' => now(),
+            'location_data' => [
+                'action' => 'update',
+                'tenant_id' => $tenant->id,
+                'unique_code' => $entity->unique_code
+            ],
+        ]);
+
         return response()->json([
             'message' => 'Entidade atualizada com sucesso.',
             'unique_code' => $unique_code,
         ], 200);
+    }
+
+    public function destroy(Request $request, $unique_code)
+    {
+        $tenant = $request->tenant;
+
+        $entity = Entity::where('unique_code', $unique_code)->first();
+
+        if (!$entity || !$this->canAccessEntity($tenant, $entity)) {
+            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
+        }
+
+        AuditLog::create([
+            'entity_id' => $entity->id,
+            'ip_address' => $request->ip(),
+            'user_agent' => $request->userAgent(),
+            'accessed_at' => now(),
+            'location_data' => [
+                'action' => 'soft_delete',
+                'tenant_id' => $tenant->id,
+                'unique_code' => $entity->unique_code
+            ],
+        ]);
+
+        $entity->delete();
+
+        return response()->json([
+            'message' => 'Entidade excluída com sucesso.',
+        ]);
     }
 
     /**
@@ -542,7 +643,11 @@ class EntityController extends Controller
         $size = (int) $request->input('size', config('qrdobem.size', 512));
         $size = max(128, min($size, 2048));
 
-        $svg = $this->qrCode->svgFor($unique_code, $size);
+        $isPrintLayout = $request->input('layout') === 'print';
+        
+        $svg = $isPrintLayout 
+            ? $this->qrCode->compositeSvgFor($entity, $size)
+            : $this->qrCode->svgFor($unique_code, $size);
 
         if ($svg === null) {
             return response()->json([
@@ -609,6 +714,43 @@ class EntityController extends Controller
         ], 201);
     }
 
+    public function reads(Request $request, $unique_code)
+    {
+        $tenant = $request->tenant;
+
+        $entity = Entity::where('unique_code', $unique_code)->first();
+
+        if (!$entity || !$this->canAccessEntity($tenant, $entity)) {
+            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
+        }
+
+        $query = $entity->entityReads()->orderBy('read_at', 'desc');
+
+        if ($request->filled('from')) {
+            $query->whereDate('read_at', '>=', $request->input('from'));
+        }
+
+        if ($request->filled('to')) {
+            $query->whereDate('read_at', '<=', $request->input('to'));
+        }
+
+        $reads = $query->paginate(15);
+
+        // Omitir ip_hash cru e meta não formatado (se houver) por privacidade.
+        $reads->getCollection()->transform(function ($read) {
+            return [
+                'id'          => $read->id,
+                'read_at'     => $read->read_at->toIso8601String(),
+                'source'      => $read->source,
+                'user_agent'  => $read->user_agent,
+                'latitude'    => $read->latitude,
+                'longitude'   => $read->longitude,
+            ];
+        });
+
+        return response()->json($reads);
+    }
+
     public function show(Request $request, $unique_code)
     {
         // Só entidade ativa aparece publicamente. 'pending_term' e 'suspended'
@@ -634,6 +776,36 @@ class EntityController extends Controller
         // Mapa de calor (Fase 6, T2-R07): agrega a leitura por célula
         // geográfica quando o navegador informou a posição.
         $this->recordHeatmap($request, $entity);
+
+        // P1-02: Gravar a leitura individual
+        try {
+            $latitude  = $request->input('latitude');
+            $longitude = $request->input('longitude');
+
+            if ($latitude === null && $location = $request->input('location')) {
+                $parts = explode(',', (string) $location);
+                if (count($parts) === 2) {
+                    $latitude  = trim($parts[0]);
+                    $longitude = trim($parts[1]);
+                }
+            }
+
+            \App\Models\EntityRead::create([
+                'entity_id'   => $entity->id,
+                'unique_code' => $entity->unique_code,
+                'entity_type' => $entity->type,
+                'read_at'     => now(),
+                'ip_hash'     => hash('sha256', $request->ip() . config('app.key')),
+                'user_agent'  => \Illuminate\Support\Str::limit($request->userAgent(), 1000),
+                'latitude'    => is_numeric($latitude) ? (float) $latitude : null,
+                'longitude'   => is_numeric($longitude) ? (float) $longitude : null,
+                'source'      => 'public_page',
+            ]);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('EntityController: falha ao gravar EntityRead', [
+                'error' => $e->getMessage(),
+            ]);
+        }
 
         // Fix 10: Endpoint público — NÃO expor contact_phone, contact_email, medical_info
         return response()->json([

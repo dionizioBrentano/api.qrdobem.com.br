@@ -90,6 +90,49 @@ class QrCodeService
     }
 
     /**
+     * Gera o SVG composto: QR Code + Legenda + Branding.
+     * Envelopa o SVG nativo gerado pelo BaconQrCode dentro de outro SVG.
+     */
+    public function compositeSvgFor(\App\Models\Entity $entity, ?int $size = null): ?string
+    {
+        $qrSvg = $this->svgFor($entity->unique_code, $size);
+        
+        if ($qrSvg === null) {
+            return null;
+        }
+
+        $caption = trim((string)$entity->qr_caption);
+        if (empty($caption)) {
+            $caption = match ($entity->type) {
+                'person' => 'Em caso de emergência, escaneie.',
+                'pet' => 'Estou perdido! Escaneie para falar com minha família.',
+                'object' => 'Se encontrou este item, escaneie o QR Code.',
+                default => 'Escaneie o QR Code',
+            };
+        }
+
+        $qrSize = $size ?? (int) config('qrdobem.size', 512);
+        
+        $width = $qrSize;
+        $height = $qrSize + 100; // 50px topo (legenda), 50px rodapé (QR do Bem)
+        
+        $escapedCaption = htmlspecialchars($caption, ENT_XML1, 'UTF-8');
+        
+        // Remove a declaração XML do SVG interno
+        $cleanQrSvg = preg_replace('/<\?xml[^>]*\?>/', '', $qrSvg);
+
+        return '<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="' . $width . '" height="' . $height . '" viewBox="0 0 ' . $width . ' ' . $height . '">
+    <rect width="100%" height="100%" fill="#ffffff" />
+    <text x="50%" y="35" font-family="sans-serif" font-size="' . max(14, round($qrSize * 0.04)) . '" font-weight="bold" fill="#000000" text-anchor="middle">' . $escapedCaption . '</text>
+    <svg x="0" y="50" width="' . $qrSize . '" height="' . $qrSize . '">
+        ' . trim($cleanQrSvg) . '
+    </svg>
+    <text x="50%" y="' . ($height - 15) . '" font-family="sans-serif" font-size="' . max(12, round($qrSize * 0.03)) . '" font-weight="bold" fill="#444444" text-anchor="middle">QR do Bem</text>
+</svg>';
+    }
+
+    /**
      * A biblioteca só existe depois do "composer install" rodar no servidor.
      * Sem essa checagem, um deploy pela metade derrubaria a criação de entidades.
      */

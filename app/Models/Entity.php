@@ -35,6 +35,7 @@ class Entity extends Model
         'credit_batch_id',
         'unique_code',
         'type',
+        'qr_caption',
         'encrypted_name',
         'encrypted_contact_phone',
         'encrypted_contact_email',
@@ -104,5 +105,10 @@ class Entity extends Model
     public function objectFields(): HasOne
     {
         return $this->hasOne(EntityObjectField::class);
+    }
+
+    public function entityReads(): HasMany
+    {
+        return $this->hasMany(EntityRead::class);
     }
 }

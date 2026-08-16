@@ -178,6 +178,8 @@ Route::middleware('auth.firebase')->group(function () {
     // QR Code gerado pela API (whitelabel: nenhum frontend precisa gerar imagem)
     Route::get('/entities/{unique_code}/qrcode', [EntityController::class, 'qrCode']);
     Route::post('/entities/{unique_code}/vaccinations', [EntityController::class, 'addVaccination']);
+    Route::get('/entities/{unique_code}/reads', [EntityController::class, 'reads']);
+    Route::delete('/entities/{unique_code}', [EntityController::class, 'destroy']);
 
     // Decifragem do CPF de quem declarou emergência (superadmin, auditado)
     Route::get('/admin/emergency-declarations/{id}/reveal', [EmergencyController::class, 'reveal']);

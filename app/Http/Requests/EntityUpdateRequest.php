@@ -18,6 +18,7 @@ class EntityUpdateRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'qr_caption' => 'nullable|string|max:100',
             'name' => 'required|string|max:255',
             'contact_phone' => 'required|string|max:20',
             'contact_email' => 'nullable|email|max:255',
