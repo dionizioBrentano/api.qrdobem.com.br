@@ -751,6 +751,61 @@ class EntityController extends Controller
         return response()->json($reads);
     }
 
+    public function alerts(Request $request, $unique_code)
+    {
+        $tenant = $request->tenant;
+
+        $entity = Entity::where('unique_code', $unique_code)->first();
+
+        if (!$entity || !$this->canAccessEntity($tenant, $entity)) {
+            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
+        }
+
+        $alerts = \Illuminate\Support\Facades\DB::table('entity_alerts')
+            ->where('entity_id', $entity->id)
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        return response()->json(['alerts' => $alerts]);
+    }
+
+    public function auditLogs(Request $request, $unique_code)
+    {
+        $tenant = $request->tenant;
+
+        $entity = Entity::where('unique_code', $unique_code)->first();
+
+        if (!$entity || !$this->canAccessEntity($tenant, $entity)) {
+            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
+        }
+
+        $logs = \App\Models\AuditLog::where('entity_id', $entity->id)
+            ->orderBy('accessed_at', 'desc')
+            ->paginate(15);
+
+        $logs->getCollection()->transform(function ($log) {
+            $action = null;
+            $locationData = $log->location_data;
+            
+            if (is_array($locationData) && isset($locationData['action'])) {
+                $action = $locationData['action'];
+            } elseif (is_string($locationData)) {
+                $decoded = json_decode($locationData, true);
+                if (is_array($decoded) && isset($decoded['action'])) {
+                    $action = $decoded['action'];
+                }
+            }
+
+            return [
+                'id' => $log->id,
+                'accessed_at' => $log->accessed_at ? $log->accessed_at->toIso8601String() : null,
+                'action' => $action ?: 'Acesso',
+            ];
+        });
+
+        return response()->json($logs);
+    }
+
     public function show(Request $request, $unique_code)
     {
         // Só entidade ativa aparece publicamente. 'pending_term' e 'suspended'
@@ -790,7 +845,7 @@ class EntityController extends Controller
                 }
             }
 
-            \App\Models\EntityRead::create([
+            $read = \App\Models\EntityRead::create([
                 'entity_id'   => $entity->id,
                 'unique_code' => $entity->unique_code,
                 'entity_type' => $entity->type,
@@ -801,6 +856,8 @@ class EntityController extends Controller
                 'longitude'   => is_numeric($longitude) ? (float) $longitude : null,
                 'source'      => 'public_page',
             ]);
+
+            app(\App\Services\EntityReadProcessor::class)->process($read, $entity);
         } catch (\Throwable $e) {
             \Illuminate\Support\Facades\Log::warning('EntityController: falha ao gravar EntityRead', [
                 'error' => $e->getMessage(),

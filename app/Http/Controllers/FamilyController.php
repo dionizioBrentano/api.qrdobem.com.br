@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\DB;
  * ENDPOINTS
  *   GET    /spaces/{space}/family            árvore completa (nós + arestas)
  *   POST   /spaces/{space}/family            cria vínculo
+ *   PUT    /spaces/{space}/family/{id}       atualiza vínculo
  *   DELETE /spaces/{space}/family/{id}       remove vínculo
  *
  * MODELO
@@ -189,6 +190,70 @@ class FamilyController extends Controller
     }
 
     /**
+     * PUT /spaces/{space}/family/{id}
+     */
+    public function update(Request $request, $spaceId, $relationshipId)
+    {
+        $space = Space::find($spaceId);
+
+        if (!$space) {
+            return response()->json(['error' => 'Espaço não encontrado.'], 404);
+        }
+
+        app(SpacePolicy::class)->authorize($request->tenant, $space, 'entity.edit');
+
+        $relationship = FamilyRelationship::where('id', $relationshipId)
+            ->where('space_id', $space->id)
+            ->first();
+
+        if (!$relationship) {
+            return response()->json(['error' => 'Vínculo não encontrado.'], 404);
+        }
+
+        $validated = $request->validate([
+            'relation_type' => 'required|string|in:' . implode(',', FamilyRelationship::TYPES),
+            'note'          => 'sometimes|nullable|string|max:255',
+        ]);
+
+        $type = $validated['relation_type'];
+        $isSymmetric = FamilyRelationship::isSymmetric($type);
+
+        if ($relationship->relation_type !== $type) {
+            if ($this->relationExists($space->id, $relationship->from_entity_id, $relationship->to_entity_id, $type, $isSymmetric, $relationship->id)) {
+                return response()->json([
+                    'error' => 'Este vínculo já está cadastrado.',
+                    'code'  => 'DUPLICATE_RELATION',
+                ], 422);
+            }
+
+            if (!$isSymmetric && $this->wouldCreateVerticalCycle($space->id, $relationship->from_entity_id, $relationship->to_entity_id, $type, $relationship->id)) {
+                return response()->json([
+                    'error' => 'Este vínculo criaria um ciclo impossível na árvore (a mesma pessoa como ascendente e descendente).',
+                    'code'  => 'CYCLE_DETECTED',
+                ], 422);
+            }
+        }
+
+        $relationship->update([
+            'relation_type' => $type,
+            'is_symmetric'  => $isSymmetric,
+            'note'          => array_key_exists('note', $validated) ? $validated['note'] : $relationship->note,
+        ]);
+
+        return response()->json([
+            'message'      => 'Vínculo atualizado.',
+            'relationship' => [
+                'id'             => $relationship->id,
+                'from_entity_id' => $relationship->from_entity_id,
+                'to_entity_id'   => $relationship->to_entity_id,
+                'relation_type'  => $relationship->relation_type,
+                'label'          => FamilyRelationship::labelOf($relationship->relation_type),
+                'is_symmetric'   => $relationship->is_symmetric,
+            ],
+        ]);
+    }
+
+    /**
      * DELETE /spaces/{space}/family/{id}
      */
     public function destroy(Request $request, $spaceId, $relationshipId)
@@ -219,10 +284,14 @@ class FamilyController extends Controller
     /**
      * O vínculo já existe? Em relação simétrica, verifica os dois sentidos.
      */
-    private function relationExists(int $spaceId, int $from, int $to, string $type, bool $isSymmetric): bool
+    private function relationExists(int $spaceId, int $from, int $to, string $type, bool $isSymmetric, ?int $excludeId = null): bool
     {
         $query = FamilyRelationship::where('space_id', $spaceId)
             ->where('relation_type', $type);
+
+        if ($excludeId) {
+            $query->where('id', '!=', $excludeId);
+        }
 
         if ($isSymmetric) {
             return $query->where(function ($q) use ($from, $to) {
@@ -249,7 +318,7 @@ class FamilyController extends Controller
      * do que qualquer árvore real cadastrada à mão, e o limite garante que
      * um dado corrompido nunca vire laço infinito numa request.
      */
-    private function wouldCreateVerticalCycle(int $spaceId, int $from, int $to, string $type): bool
+    private function wouldCreateVerticalCycle(int $spaceId, int $from, int $to, string $type, ?int $excludeId = null): bool
     {
         $verticalTypes = [
             FamilyRelationship::PARENT_OF,
@@ -272,6 +341,10 @@ class FamilyController extends Controller
         for ($depth = 0; $depth < 10 && !empty($frontier); $depth++) {
             $query = FamilyRelationship::where('space_id', $spaceId)
                 ->whereIn('relation_type', $verticalTypes);
+
+            if ($excludeId) {
+                $query->where('id', '!=', $excludeId);
+            }
 
             $next = $descendantDirection
                 ? $query->whereIn('to_entity_id', $frontier)->pluck('from_entity_id')->all()

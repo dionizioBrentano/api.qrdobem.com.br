@@ -111,6 +111,7 @@ Route::middleware('auth.firebase')->group(function () {
     Route::get('/donation-causes/mine', [DonationCauseController::class, 'mine']);
     Route::post('/donation-causes/subscribe', [DonationCauseController::class, 'subscribe']);
     Route::post('/donation-causes/{subscription}/cancel-subscription', [DonationCauseController::class, 'cancelSubscription']);
+    Route::get('/spaces/{space}/donations', [DonationCauseController::class, 'indexBySpace']);
 
     // --- Beneficiários (Fase 4, T4-R05, T4-R09) ---
     Route::post('/spaces/{space}/beneficiaries', [BeneficiaryController::class, 'store']);
@@ -157,6 +158,7 @@ Route::middleware('auth.firebase')->group(function () {
     // Árvore genealógica do espaço familiar (Fase 1, T1-R02).
     Route::get('/spaces/{space}/family', [FamilyController::class, 'index']);
     Route::post('/spaces/{space}/family', [FamilyController::class, 'store']);
+    Route::put('/spaces/{space}/family/{relationship}', [FamilyController::class, 'update']);
     Route::delete('/spaces/{space}/family/{relationship}', [FamilyController::class, 'destroy']);
 
     // Botão de Pânico (T1-R07) — versão rústica, alarme no app + e-mail.
@@ -179,6 +181,8 @@ Route::middleware('auth.firebase')->group(function () {
     Route::get('/entities/{unique_code}/qrcode', [EntityController::class, 'qrCode']);
     Route::post('/entities/{unique_code}/vaccinations', [EntityController::class, 'addVaccination']);
     Route::get('/entities/{unique_code}/reads', [EntityController::class, 'reads']);
+    Route::get('/entities/{unique_code}/alerts', [EntityController::class, 'alerts']);
+    Route::get('/entities/{unique_code}/audit-logs', [EntityController::class, 'auditLogs']);
     Route::delete('/entities/{unique_code}', [EntityController::class, 'destroy']);
     
     // Mídia da entidade (Fase 3/P3-02)

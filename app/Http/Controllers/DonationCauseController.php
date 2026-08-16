@@ -60,6 +60,7 @@ use Illuminate\Support\Str;
  *   POST /donation-causes/subscribe  assinatura recorrente (exige conta)
  *   POST /donation-causes/{id}/cancel-subscription
  *   GET  /causes/{slug}/donations    (público) últimas doações da causa
+ *   GET  /spaces/{space}/donations   (auth) lista todas as doações da causa para o admin
  */
 class DonationCauseController extends Controller
 {
@@ -444,6 +445,36 @@ class DonationCauseController extends Controller
                 'created_at'     => $d->created_at,
             ])->values(),
             'total_donated' => $donations->where('status', 'paid')->sum('amount'),
+        ]);
+    }
+
+    /** GET /spaces/{space}/donations */
+    public function indexBySpace(Request $request, $spaceId)
+    {
+        $space = \App\Models\Space::find($spaceId);
+
+        if (!$space || $space->type !== \App\Models\Space::TYPE_CAUSE) {
+            return response()->json(['error' => 'Espaço de causa não encontrado.'], 404);
+        }
+
+        app(\App\Policies\SpacePolicy::class)->authorize($request->tenant, $space, 'space.edit');
+
+        $donations = DonationCause::where('cause_space_id', $space->id)
+            ->orderByDesc('id')
+            ->limit(100)
+            ->get();
+
+        return response()->json([
+            'donations' => $donations->map(fn (DonationCause $d) => [
+                'id'             => $d->id,
+                'donor_name'     => $d->donor_name,
+                'amount'         => $d->amount,
+                'status'         => $d->status,
+                'payment_method' => $d->payment_method,
+                'created_at'     => $d->created_at,
+                'paid_at'        => $d->paid_at,
+            ])->values(),
+            'total_raised' => $donations->where('status', 'paid')->sum('amount_to_cause'),
         ]);
     }
 
