@@ -220,6 +220,7 @@ Route::middleware('auth.firebase')->group(function () {
     Route::post('/credits/checkout', [CreditController::class, 'checkout']);
     Route::post('/credits/checkout/card', [CreditController::class, 'checkoutCard']);
     Route::get('/credits/orders/{id}', [CreditController::class, 'showOrder']);
+    Route::get('/admin/credits/pricing', [AdminController::class, 'getPricing']);
     Route::put('/admin/credits/pricing', [AdminController::class, 'updatePricing']);
 
     // --- Contatos de Emergência (Independente de Tenant) ---

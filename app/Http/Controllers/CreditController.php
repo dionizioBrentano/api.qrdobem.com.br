@@ -28,32 +28,15 @@ class CreditController extends Controller
     /**
      * Retorna o preço e os limites configurados para compra de créditos.
      */
-    public function pricing()
+    public function pricing(\App\Services\PricingService $pricingService)
     {
-        $pricing = CreditPricing::first();
-
-        if ($pricing) {
-            $unitPrice = $pricing->unit_price;
-            $minQty = $pricing->min_quantity;
-            $maxQty = $pricing->max_quantity;
-        } else {
-            $unitPrice = config('mercadopago.defaults.unit_price');
-            $minQty = config('mercadopago.defaults.min_qty');
-            $maxQty = config('mercadopago.defaults.max_qty');
-        }
-
-        return response()->json([
-            'unit_price' => (float) $unitPrice,
-            'min_quantity' => (int) $minQty,
-            'max_quantity' => (int) $maxQty,
-            'currency' => 'BRL',
-        ]);
+        return response()->json($pricingService->getPricingPayload());
     }
 
     /**
      * Cria a intenção de compra e gera a preference no Mercado Pago.
      */
-    public function checkout(Request $request, MercadoPagoService $mpService)
+    public function checkout(Request $request, MercadoPagoService $mpService, \App\Services\PricingService $pricingService)
     {
         $tenant = $request->tenant;
 
@@ -68,10 +51,10 @@ class CreditController extends Controller
             return response()->json(['error' => 'Email do perfil é obrigatório para pagamento via PIX.'], 422);
         }
 
-        $pricing = CreditPricing::first();
-        $unitPrice = $pricing ? $pricing->unit_price : config('mercadopago.defaults.unit_price');
-        $minQty = $pricing ? $pricing->min_quantity : config('mercadopago.defaults.min_qty');
-        $maxQty = $pricing ? $pricing->max_quantity : config('mercadopago.defaults.max_qty');
+        $pricingPayload = $pricingService->getPricingPayload();
+        $unitPrice = $pricingPayload['unit_price_effective'];
+        $minQty = $pricingPayload['min_quantity'];
+        $maxQty = $pricingPayload['max_quantity'];
 
         $request->validate([
             'quantity' => "required|integer|min:{$minQty}|max:{$maxQty}",
@@ -159,7 +142,7 @@ class CreditController extends Controller
     /**
      * Cria um pagamento com Cartão via Checkout API (Payment Brick).
      */
-    public function checkoutCard(Request $request, MercadoPagoService $mpService)
+    public function checkoutCard(Request $request, MercadoPagoService $mpService, \App\Services\PricingService $pricingService)
     {
         $tenant = $request->tenant;
 
@@ -196,9 +179,16 @@ class CreditController extends Controller
             ], 422);
         }
 
-        $pricing = CreditPricing::first();
-        $unitPrice = $pricing ? $pricing->unit_price : config('mercadopago.defaults.unit_price');
+        $pricingPayload = $pricingService->getPricingPayload();
+        $unitPrice = $pricingPayload['unit_price_effective'];
+        $minQty = $pricingPayload['min_quantity'];
+        $maxQty = $pricingPayload['max_quantity'];
+        
         $quantity = $request->quantity;
+        
+        if ($quantity < $minQty || $quantity > $maxQty) {
+            return response()->json(['error' => "A quantidade deve ser entre {$minQty} e {$maxQty}."], 422);
+        }
         $priceAmount = round($quantity * $unitPrice, 2);
 
         $organization = $tenant->organizations()->first();

@@ -169,29 +169,50 @@ class AdminController extends Controller
         ]);
     }
 
-    public function updatePricing(Request $request)
+    public function getPricing(Request $request, \App\Services\PricingService $pricingService)
+    {
+        if (!$this->authorizeSuperAdmin($request)) {
+            return response()->json(['error' => 'Acesso negado. Apenas super administradores.'], 403);
+        }
+
+        return response()->json($pricingService->getPricingPayload());
+    }
+
+    public function updatePricing(Request $request, \App\Services\PricingService $pricingService)
     {
         if (!$this->authorizeSuperAdmin($request)) {
             return response()->json(['error' => 'Acesso negado. Apenas super administradores.'], 403);
         }
 
         $request->validate([
-            'unit_price' => 'required|numeric|min:0.01',
-            'min_quantity' => 'required|integer|min:1',
-            'max_quantity' => 'required|integer|min:1|gte:min_quantity',
+            'unit_price' => 'nullable|numeric|min:0.01',
+            'min_quantity' => 'nullable|integer|min:1',
+            'max_quantity' => 'nullable|integer|min:1|gte:min_quantity',
+            'adventure_yearly_price' => 'nullable|numeric|min:0',
+            'family_pack_qty' => 'nullable|integer|min:1',
+            'family_pack_price' => 'nullable|numeric|min:0',
+            'launch_offer_enabled' => 'nullable|boolean',
+            'launch_offer_discount_percent' => 'nullable|numeric|min:0|max:100',
+            'launch_offer_ends_at' => 'nullable|date',
         ]);
 
         $pricing = \App\Models\CreditPricing::first();
 
+        $data = $request->only([
+            'unit_price', 'min_quantity', 'max_quantity',
+            'adventure_yearly_price', 'family_pack_qty', 'family_pack_price',
+            'launch_offer_enabled', 'launch_offer_discount_percent', 'launch_offer_ends_at'
+        ]);
+
         if ($pricing) {
-            $pricing->update($request->only(['unit_price', 'min_quantity', 'max_quantity']));
+            $pricing->update($data);
         } else {
-            $pricing = \App\Models\CreditPricing::create($request->only(['unit_price', 'min_quantity', 'max_quantity']));
+            $pricing = \App\Models\CreditPricing::create($data);
         }
 
         return response()->json([
             'message' => 'Configurações de preço atualizadas com sucesso.',
-            'pricing' => $pricing,
+            'pricing' => $pricingService->getPricingPayload(),
         ]);
     }
 }
