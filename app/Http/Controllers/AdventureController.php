@@ -3,29 +3,60 @@
 namespace App\Http\Controllers;
 
 use App\Models\Entity;
-use App\Models\EntityReferencePoint;
+use App\Models\CreditBatch;
+use App\Models\Space;
+use App\Policies\SpacePolicy;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Log;
 
 class AdventureController extends Controller
 {
     /**
-     * Helper to resolve the entity by unique_code, mirroring EntityController logic.
-     * In this project's panel, users manage entities within their space/tenant.
-     * We assume authorization is already done or can be added similar to EntityController.
-     * For now, we trust the tenant constraint on the entity.
+     * Helper para checar acesso à entidade seguindo a mesma lógica do EntityController.
+     */
+    private function canAccessEntity($tenant, Entity $entity): bool
+    {
+        $orgIds = $tenant->organizations()->pluck('organizations.id')->all();
+
+        if ($entity->organization_id && in_array($entity->organization_id, $orgIds)) {
+            return true;
+        }
+
+        if (!$entity->organization_id && $entity->credit_batch_id) {
+            $batch = CreditBatch::find($entity->credit_batch_id);
+            if ($batch && $batch->recipient_tenant_id === $tenant->id) {
+                return true;
+            }
+        }
+
+        if (!$entity->space_id) {
+            return false;
+        }
+
+        try {
+            $space = Space::find($entity->space_id);
+
+            return $space
+                ? app(SpacePolicy::class)->check($tenant, $space, 'entity.view')
+                : false;
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
+
+    /**
+     * Tenta resolver a entidade e verificar a autorização.
+     * Retorna a Entity ou null se falhar/negado.
      */
     private function resolveEntity(Request $request, $unique_code)
     {
         $tenant = $request->tenant;
-        // Simplified resolution assuming space access (matching standard EntityController).
-        // Since we don't have full context of space/tenant checks here, we will fetch it
-        // and ideally we'd check $entity->space_id or organization_id.
-        $entity = Entity::where('unique_code', $unique_code)->firstOrFail();
-        
-        // Em um cenário real, deveríamos checar se o usuário tem permissão para esta Entity.
-        // Como não tenho o código do SpacePolicy, assumiremos que a Entity foi encontrada.
+        $entity = Entity::where('unique_code', $unique_code)->first();
+
+        if (!$entity || !$this->canAccessEntity($tenant, $entity)) {
+            return null;
+        }
+
         return $entity;
     }
 
@@ -33,7 +64,10 @@ class AdventureController extends Controller
     {
         $entity = $this->resolveEntity($request, $unique_code);
 
-        // Somente para tipo person
+        if (!$entity) {
+            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
+        }
+
         if ($entity->type !== 'person') {
             return response()->json(['error' => 'Trilha Aventura suportada apenas para pessoas.'], 400);
         }
@@ -45,19 +79,27 @@ class AdventureController extends Controller
     {
         $entity = $this->resolveEntity($request, $unique_code);
 
+        if (!$entity) {
+            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
+        }
+
         if ($entity->type !== 'person') {
             return response()->json(['error' => 'Trilha Aventura suportada apenas para pessoas.'], 400);
         }
 
         $validated = $request->validate([
             'name' => 'required|string|max:100',
-            'latitude' => 'nullable|numeric',
-            'longitude' => 'nullable|numeric',
+            'latitude' => 'required|numeric',
+            'longitude' => 'required|numeric',
             'radius_meters' => 'nullable|integer|min:10',
             'days_of_week' => 'nullable|array',
             'start_time' => 'nullable|date_format:H:i',
             'end_time' => 'nullable|date_format:H:i',
         ]);
+
+        if (!isset($validated['radius_meters'])) {
+            $validated['radius_meters'] = 50;
+        }
 
         $point = $entity->referencePoints()->create($validated);
 
@@ -67,7 +109,11 @@ class AdventureController extends Controller
     public function destroyReferencePoint(Request $request, $unique_code, $point_id)
     {
         $entity = $this->resolveEntity($request, $unique_code);
-        
+
+        if (!$entity) {
+            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
+        }
+
         $point = $entity->referencePoints()->where('id', $point_id)->firstOrFail();
         $point->delete();
 
@@ -77,6 +123,10 @@ class AdventureController extends Controller
     public function setSilentPassword(Request $request, $unique_code)
     {
         $entity = $this->resolveEntity($request, $unique_code);
+
+        if (!$entity) {
+            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
+        }
 
         if ($entity->type !== 'person') {
             return response()->json(['error' => 'Trilha Aventura suportada apenas para pessoas.'], 400);
