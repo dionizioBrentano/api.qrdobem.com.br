@@ -190,6 +190,12 @@ Route::middleware('auth.firebase')->group(function () {
     Route::get('/entities/{unique_code}/media', [EntityController::class, 'listMedia']);
     Route::delete('/entities/{unique_code}/media/{mediaId}', [EntityController::class, 'destroyMedia']);
 
+    // Trilha Aventura / Rotina (Fase 1 / Configuração do Dono)
+    Route::get('/entities/{unique_code}/adventure/reference-points', [\App\Http\Controllers\AdventureController::class, 'listReferencePoints']);
+    Route::post('/entities/{unique_code}/adventure/reference-points', [\App\Http\Controllers\AdventureController::class, 'storeReferencePoint']);
+    Route::delete('/entities/{unique_code}/adventure/reference-points/{point}', [\App\Http\Controllers\AdventureController::class, 'destroyReferencePoint']);
+    Route::post('/entities/{unique_code}/adventure/silent-password', [\App\Http\Controllers\AdventureController::class, 'setSilentPassword']);
+
     // Decifragem do CPF de quem declarou emergência (superadmin, auditado)
     Route::get('/admin/emergency-declarations/{id}/reveal', [EmergencyController::class, 'reveal']);
 

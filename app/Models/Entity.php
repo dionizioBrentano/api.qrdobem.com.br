@@ -45,6 +45,11 @@ class Entity extends Model
         // Sem isso o Eloquent descarta o status e toda entidade nasce
         // como 'pending_term', mesmo com o termo aceito.
         'status',
+        'silent_password_hash',
+    ];
+
+    protected $hidden = [
+        'silent_password_hash',
     ];
 
     protected $casts = [
@@ -121,5 +126,10 @@ class Entity extends Model
     {
         return $this->hasMany(MediaItem::class, 'owner_id')
                     ->where('owner_type', MediaItem::OWNER_ENTITY);
+    }
+
+    public function referencePoints(): HasMany
+    {
+        return $this->hasMany(EntityReferencePoint::class);
     }
 }
