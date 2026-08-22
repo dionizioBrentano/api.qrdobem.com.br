@@ -17,18 +17,18 @@ class PricingService
         $cfg = config('pricing');
 
         return [
-            'unit_price' => $db->unit_price ?? $cfg['unit_price'],
-            'min_quantity' => $db->min_quantity ?? $cfg['min_quantity'],
-            'max_quantity' => $db->max_quantity ?? $cfg['max_quantity'],
+            'unit_price' => $db?->unit_price ?? $cfg['unit_price'],
+            'min_quantity' => $db?->min_quantity ?? $cfg['min_quantity'],
+            'max_quantity' => $db?->max_quantity ?? $cfg['max_quantity'],
             
-            'adventure_yearly_price' => $db->adventure_yearly_price ?? $cfg['adventure_yearly_price'],
+            'adventure_yearly_price' => $db?->adventure_yearly_price ?? $cfg['adventure_yearly_price'],
             
-            'family_pack_qty' => $db->family_pack_qty ?? $cfg['family_pack_qty'],
-            'family_pack_price' => $db->family_pack_price ?? $cfg['family_pack_price'],
+            'family_pack_qty' => $db?->family_pack_qty ?? $cfg['family_pack_qty'],
+            'family_pack_price' => $db?->family_pack_price ?? $cfg['family_pack_price'],
             
-            'launch_offer_enabled' => $db->launch_offer_enabled ?? $cfg['launch_offer_enabled'],
-            'launch_offer_discount_percent' => $db->launch_offer_discount_percent ?? $cfg['launch_offer_discount_percent'],
-            'launch_offer_ends_at' => $db->launch_offer_ends_at ?? $cfg['launch_offer_ends_at'],
+            'launch_offer_enabled' => $db?->launch_offer_enabled ?? $cfg['launch_offer_enabled'],
+            'launch_offer_discount_percent' => $db?->launch_offer_discount_percent ?? $cfg['launch_offer_discount_percent'],
+            'launch_offer_ends_at' => $db?->launch_offer_ends_at ?? $cfg['launch_offer_ends_at'],
         ];
     }
 
