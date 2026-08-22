@@ -141,4 +141,103 @@ class AdventureController extends Controller
 
         return response()->json(['message' => 'Senha silenciosa definida com sucesso.']);
     }
+
+    public function createChallenge(Request $request, $unique_code)
+    {
+        $entity = $this->resolveEntity($request, $unique_code);
+
+        if (!$entity) {
+            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
+        }
+
+        if ($entity->type !== 'person') {
+            return response()->json(['error' => 'Trilha Aventura suportada apenas para pessoas.'], 400);
+        }
+
+        $validated = $request->validate([
+            'latitude' => 'nullable|numeric',
+            'longitude' => 'nullable|numeric',
+            'detected_at' => 'nullable|date',
+        ]);
+
+        $challenge = \App\Models\AdventureEvent::create([
+            'entity_id' => $entity->id,
+            'type' => 'pending_challenge',
+            'status' => 'pending',
+            'metadata' => $validated,
+        ]);
+
+        return response()->json([
+            'challenge_id' => $challenge->id,
+            'message' => 'Você parece estar fora da sua rotina. Confirme com sua senha.',
+        ], 201);
+    }
+
+    public function silentTrigger(Request $request, $unique_code)
+    {
+        $entity = $this->resolveEntity($request, $unique_code);
+
+        if (!$entity) {
+            // Se falhar autorização, em teoria o padrão da API já é 404.
+            // Para manter o silent total mesmo sem auth, precisaria ver se é a ideia,
+            // mas o prompt diz "Só o dono autenticado da Entity (via canAccessEntity) pode chamar esses endpoints".
+            // Então retornar 404 aqui é esperado e alinhado com o resolveEntity padrão.
+            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
+        }
+
+        if ($entity->type !== 'person') {
+            return response()->json(['error' => 'Trilha Aventura suportada apenas para pessoas.'], 400);
+        }
+
+        $request->validate([
+            'challenge_id' => 'required|integer',
+            'password' => 'required|string',
+        ]);
+
+        $challenge = \App\Models\AdventureEvent::where('id', $request->challenge_id)
+            ->where('entity_id', $entity->id)
+            ->where('status', 'pending')
+            ->first();
+
+        // Sempre a mesma resposta genérica, independente de falhas a partir daqui
+        $genericResponse = response()->json([
+            'message' => 'Verificação registrada.'
+        ], 200);
+
+        if (!$challenge) {
+            return $genericResponse;
+        }
+
+        if (!$entity->silent_password_hash || !Hash::check($request->password, $entity->silent_password_hash)) {
+            return $genericResponse;
+        }
+
+        // Senha correta: atualiza status e dispara pânico
+        $challenge->update([
+            'type' => 'silent_triggered',
+            'status' => 'resolved'
+        ]);
+
+        // Dispara pânico silencioso
+        $space = $entity->space_id ? \App\Models\Space::find($entity->space_id) : null;
+        
+        $panicController = app(\App\Http\Controllers\PanicController::class);
+        $panicEvent = $panicController->createEvent(
+            $space,
+            [
+                'entity_id' => $entity->id,
+                'latitude' => $challenge->metadata['latitude'] ?? null,
+                'longitude' => $challenge->metadata['longitude'] ?? null,
+                'note' => 'Alerta Silencioso (Trilha Aventura)',
+            ],
+            \App\Models\PanicEvent::SOURCE_APP,
+            $request->tenant
+        );
+
+        if ($space) {
+            $panicController->notifyFamily($space, $panicEvent, $request->tenant?->name);
+        }
+
+        return $genericResponse;
+    }
 }

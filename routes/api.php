@@ -195,6 +195,8 @@ Route::middleware('auth.firebase')->group(function () {
     Route::post('/entities/{unique_code}/adventure/reference-points', [\App\Http\Controllers\AdventureController::class, 'storeReferencePoint']);
     Route::delete('/entities/{unique_code}/adventure/reference-points/{point}', [\App\Http\Controllers\AdventureController::class, 'destroyReferencePoint']);
     Route::post('/entities/{unique_code}/adventure/silent-password', [\App\Http\Controllers\AdventureController::class, 'setSilentPassword']);
+    Route::post('/entities/{unique_code}/adventure/challenge', [\App\Http\Controllers\AdventureController::class, 'createChallenge']);
+    Route::post('/entities/{unique_code}/adventure/silent-trigger', [\App\Http\Controllers\AdventureController::class, 'silentTrigger']);
 
     // Decifragem do CPF de quem declarou emergência (superadmin, auditado)
     Route::get('/admin/emergency-declarations/{id}/reveal', [EmergencyController::class, 'reveal']);

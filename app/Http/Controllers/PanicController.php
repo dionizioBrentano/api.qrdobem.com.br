@@ -257,7 +257,7 @@ class PanicController extends Controller
      * Feito antes de qualquer envio, de propósito: mesmo que toda a
      * notificação falhe, fica o registro de que alguém pediu socorro.
      */
-    private function createEvent(?Space $space, array $data, string $source, ?Tenant $tenant): PanicEvent
+    public function createEvent(?Space $space, array $data, string $source, ?Tenant $tenant): PanicEvent
     {
         return PanicEvent::create([
             'space_id'               => $space?->id,
@@ -273,7 +273,7 @@ class PanicController extends Controller
         ]);
     }
 
-    private function notifyFamily(?Space $space, PanicEvent $event, ?string $triggeredByName): array
+    public function notifyFamily(?Space $space, PanicEvent $event, ?string $triggeredByName): array
     {
         $memberTenantIds = collect();
         if ($space) {
