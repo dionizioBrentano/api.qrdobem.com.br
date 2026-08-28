@@ -29,3 +29,6 @@ Thumbs.db
 # Lixo do CPanel / FTP
 .ftpquota
 /id
+
+# Permissoes locais do Claude Code (o CLAUDE.md do projeto E versionado)
+.claude/settings.local.json

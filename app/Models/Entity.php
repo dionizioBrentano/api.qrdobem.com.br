@@ -132,4 +132,9 @@ class Entity extends Model
     {
         return $this->hasMany(EntityReferencePoint::class);
     }
+
+    public function routines(): HasMany
+    {
+        return $this->hasMany(Routine::class);
+    }
 }
