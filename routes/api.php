@@ -184,7 +184,7 @@ Route::middleware('auth.firebase')->group(function () {
     Route::get('/entities/{unique_code}/alerts', [EntityController::class, 'alerts']);
     Route::get('/entities/{unique_code}/audit-logs', [EntityController::class, 'auditLogs']);
     Route::delete('/entities/{unique_code}', [EntityController::class, 'destroy']);
-    
+
     // Mídia da entidade (Fase 3/P3-02)
     Route::post('/entities/{unique_code}/media', [EntityController::class, 'storeMedia']);
     Route::get('/entities/{unique_code}/media', [EntityController::class, 'listMedia']);
@@ -197,6 +197,19 @@ Route::middleware('auth.firebase')->group(function () {
     Route::post('/entities/{unique_code}/adventure/silent-password', [\App\Http\Controllers\AdventureController::class, 'setSilentPassword']);
     Route::post('/entities/{unique_code}/adventure/challenge', [\App\Http\Controllers\AdventureController::class, 'createChallenge']);
     Route::post('/entities/{unique_code}/adventure/silent-trigger', [\App\Http\Controllers\AdventureController::class, 'silentTrigger']);
+
+    Route::get('/entities/{unique_code}/adventure/routines', [\App\Http\Controllers\RoutineController::class, 'index']);
+    Route::post('/entities/{unique_code}/adventure/routines', [\App\Http\Controllers\RoutineController::class, 'store']);
+    Route::put('/entities/{unique_code}/adventure/routines/{routine}', [\App\Http\Controllers\RoutineController::class, 'update']);
+    Route::delete('/entities/{unique_code}/adventure/routines/{routine}', [\App\Http\Controllers\RoutineController::class, 'destroy']);
+    Route::get('/entities/{unique_code}/adventure/routines/{routine}/points', [\App\Http\Controllers\RoutineController::class, 'listPoints']);
+    Route::post('/entities/{unique_code}/adventure/routines/{routine}/points', [\App\Http\Controllers\RoutineController::class, 'storePoint']);
+    Route::put('/entities/{unique_code}/adventure/routines/{routine}/points/{point}', [\App\Http\Controllers\RoutineController::class, 'updatePoint']);
+    Route::delete('/entities/{unique_code}/adventure/routines/{routine}/points/{point}', [\App\Http\Controllers\RoutineController::class, 'destroyPoint']);
+    Route::get('/entities/{unique_code}/adventure/routines/{routine}/windows', [\App\Http\Controllers\RoutineController::class, 'listWindows']);
+    Route::post('/entities/{unique_code}/adventure/routines/{routine}/windows', [\App\Http\Controllers\RoutineController::class, 'storeWindow']);
+    Route::put('/entities/{unique_code}/adventure/routines/{routine}/windows/{window}', [\App\Http\Controllers\RoutineController::class, 'updateWindow']);
+    Route::delete('/entities/{unique_code}/adventure/routines/{routine}/windows/{window}', [\App\Http\Controllers\RoutineController::class, 'destroyWindow']);
 
     // Decifragem do CPF de quem declarou emergência (superadmin, auditado)
     Route::get('/admin/emergency-declarations/{id}/reveal', [EmergencyController::class, 'reveal']);
@@ -238,7 +251,7 @@ Route::post('/emergency-contact-invites/{token}/push-subscription', [\App\Http\C
 // VAPID Public Key sem auth
 Route::get('/push/public-key', function () {
     return response()->json([
-        'publicKey' => env('VAPID_PUBLIC_KEY')
+        'publicKey' => env('VAPID_PUBLIC_KEY'),
     ]);
 });
 
@@ -325,7 +338,6 @@ Route::middleware('auth.firebase.optional')->group(function () {
 
 Route::get('/donation-causes/status/{token}', [DonationCauseController::class, 'publicStatus'])
     ->middleware('throttle:donation-preview');
-
 
 // Últimas doações de uma causa — prova social do lado do dinheiro. Path
 // cause-scoped mantido (é leitura pública sob a causa, não checkout).
