@@ -302,7 +302,7 @@ class SpaceController extends Controller
                 // Cria lote espelho no espaço filho
                 \App\Models\CreditBatch::create([
                     'creator_tenant_id' => $request->tenant->id,
-                    'recipient_tenant_id' => clone $child->organization_id ? null : clone $child->owner_tenant_id,
+                    'recipient_tenant_id' => $child->organization_id ? null : $child->owner_tenant_id,
                     'organization_id' => $child->organization_id,
                     'space_id' => $child->id,
                     'amount_total' => $deduct,
@@ -310,7 +310,7 @@ class SpaceController extends Controller
                     'unit_price' => $batch->unit_price,
                     'expires_at' => $batch->expires_at,
                     'status' => 'active',
-                    'source' => "Transferência do espaço pai #{$batch->space_id ?? 'Geral'}",
+                    'source' => 'Transferência do espaço pai #' . ($batch->space_id ?? 'Geral'),
                 ]);
 
                 $remainingToTransfer -= $deduct;
