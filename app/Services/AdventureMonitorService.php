@@ -278,4 +278,130 @@ class AdventureMonitorService
         // O QUE NÃO DESLIGA (blocos futuros 14):
         // afastamento do acompanhante continuam em qualquer horário.
     }
+
+    public function escalatePending(): void
+    {
+        $escalateMinutes = config('adventure.escalate_minutes');
+        $threshold = now()->subMinutes($escalateMinutes);
+
+        $events = AdventureEvent::with('entity.space')->where('type', 'wellness_check')
+            ->where('status', 'pending')
+            ->where('requested_at', '<=', $threshold)
+            ->get();
+
+        if ($events->isEmpty()) {
+            return;
+        }
+
+        $dispatcher = app(\App\Services\Notification\NotificationDispatcher::class);
+
+        foreach ($events as $event) {
+            $event->update(['status' => 'escalated']);
+
+            $entity = $event->entity;
+            if (!$entity) {
+                continue;
+            }
+
+            $space = $entity->space;
+
+            $reasonText = match ($event->reason) {
+                'off_route' => 'fora da rota ou área esperada',
+                'idle' => 'sem movimentação pelo tempo limite',
+                'companion_far' => 'distante do acompanhante',
+                'manual' => 'acionado manualmente',
+                default => 'motivo desconhecido'
+            };
+
+            $lat = $event->metadata['latitude'] ?? null;
+            $lng = $event->metadata['longitude'] ?? null;
+            
+            $mapsUrl = ($lat && $lng) ? "https://maps.google.com/?q={$lat},{$lng}" : null;
+            $locationText = ($lat && $lng) ? "{$lat}, {$lng}" : 'não informada';
+
+            $body = "ALERTA DE CHECAGEM SEM RESPOSTA\n\n"
+                  . "Pessoa protegida: {$entity->name}\n"
+                  . "Motivo: {$reasonText}\n"
+                  . "Última posição: {$locationText}\n";
+
+            if ($mapsUrl) {
+                $body .= "Mapa: {$mapsUrl}\n";
+            }
+
+            $message = new \App\Services\Notification\NotificationMessage(
+                subject: 'Alerta: Checagem de Trilha sem resposta',
+                body: $body,
+                template: 'wellness_escalation',
+                templateData: [$entity->name, $reasonText, $mapsUrl ?? 'não informada'],
+                url: $mapsUrl,
+                priority: 'high'
+            );
+
+            // 1. Membros do Space
+            $memberTenantIds = collect();
+            if ($space) {
+                $memberTenantIds = \App\Models\SpaceMember::where('space_id', $space->id)
+                    ->whereNotNull('accepted_at')
+                    ->pluck('tenant_id')
+                    ->push($space->owner_tenant_id)
+                    ->unique()
+                    ->values();
+            }
+            $members = \App\Models\Tenant::whereIn('id', $memberTenantIds)->get();
+
+            // 2. Contatos de Emergência
+            $emergencyContacts = \App\Models\EmergencyContact::where('status', 'accepted')
+                ->where('entity_id', $entity->id)
+                ->get();
+
+            $results = [];
+
+            foreach ($members as $member) {
+                $destinations = array_filter([
+                    'push'     => $member->push_subscription ? json_encode($member->push_subscription) : null,
+                    'mail'     => $member->email,
+                    'whatsapp' => $member->phone,
+                ]);
+
+                if (empty($destinations)) {
+                    continue;
+                }
+
+                $result = $dispatcher->sendVia($destinations, ['push', 'mail', 'whatsapp'], $message);
+                $results[] = [
+                    'tenant_id' => $member->id,
+                    'name'      => $member->name,
+                    'channel'   => $result->channel,
+                    'success'   => $result->success,
+                ];
+            }
+
+            foreach ($emergencyContacts as $contact) {
+                $destinations = array_filter([
+                    'push'     => $contact->push_subscription ? json_encode($contact->push_subscription) : null,
+                    'mail'     => $contact->email,
+                ]);
+
+                if (empty($destinations) && $contact->email) {
+                    $destinations['mail'] = $contact->email;
+                }
+
+                if (empty($destinations)) {
+                    continue;
+                }
+
+                $result = $dispatcher->sendVia($destinations, ['push', 'mail'], $message);
+                $results[] = [
+                    'contact_id' => $contact->id,
+                    'name'       => $contact->name,
+                    'channel'    => $result->channel,
+                    'success'    => $result->success,
+                ];
+            }
+
+            $metadata = $event->metadata ?? [];
+            $metadata['escalation_results'] = $results;
+            $event->update(['metadata' => $metadata]);
+        }
+    }
 }

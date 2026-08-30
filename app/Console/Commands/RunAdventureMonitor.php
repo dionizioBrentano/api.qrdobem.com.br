@@ -70,6 +70,9 @@ class RunAdventureMonitor extends Command
             $this->info("Total avaliado: {$evaluatedCount}");
             $this->info("Checagens criadas: {$createdChecksCount}");
 
+            $this->info('Escalonando checagens sem resposta...');
+            $monitorService->escalatePending();
+
             return self::SUCCESS;
         } finally {
             $lock->release();
