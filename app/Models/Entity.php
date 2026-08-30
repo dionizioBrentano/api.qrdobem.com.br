@@ -137,4 +137,9 @@ class Entity extends Model
     {
         return $this->hasMany(Routine::class);
     }
+
+    public function positions(): HasMany
+    {
+        return $this->hasMany(EntityPosition::class);
+    }
 }
