@@ -97,6 +97,40 @@ class AdventureMonitorService
         return true;
     }
 
+    public function companionDistance(Entity $entity): ?float
+    {
+        $freshMinutes = config('adventure.companion_fresh_minutes');
+        $threshold = now()->subMinutes($freshMinutes);
+
+        $protectedDevices = $entity->devices()->where('role', 'protected')->pluck('device_id');
+        $companionDevices = $entity->devices()->where('role', 'companion')->pluck('device_id');
+
+        if ($protectedDevices->isEmpty() || $companionDevices->isEmpty()) {
+            return null;
+        }
+
+        $protectedPos = $entity->positions()
+            ->whereIn('device_id', $protectedDevices)
+            ->where('recorded_at', '>=', $threshold)
+            ->orderByDesc('recorded_at')
+            ->first();
+
+        $companionPos = $entity->positions()
+            ->whereIn('device_id', $companionDevices)
+            ->where('recorded_at', '>=', $threshold)
+            ->orderByDesc('recorded_at')
+            ->first();
+
+        if (!$protectedPos || !$companionPos) {
+            return null;
+        }
+
+        return $this->distanceMeters(
+            $protectedPos->latitude, $protectedPos->longitude,
+            $companionPos->latitude, $companionPos->longitude
+        );
+    }
+
     public function shouldChargeIdle(Routine $routine, EntityPosition $position, \Carbon\Carbon $at): bool
     {
         $activeWindows = $this->activeWindows($routine, $at);
@@ -271,12 +305,47 @@ class AdventureMonitorService
                             'longitude' => $lastPosition->longitude,
                         ],
                     ]);
+                    $offRouteCreated = true;
                 }
             }
         }
         
-        // O QUE NÃO DESLIGA (blocos futuros 14):
-        // afastamento do acompanhante continuam em qualquer horário.
+        // 14. AFASTAMENTO DO ACOMPANHANTE
+        if (!$offRouteCreated) {
+            $dist = $this->companionDistance($entity);
+            if ($dist !== null && $dist > config('adventure.companion_max_meters')) {
+                // Fetch devices again to put in metadata
+                $freshMinutes = config('adventure.companion_fresh_minutes');
+                $threshold = now()->subMinutes($freshMinutes);
+                
+                $protectedPos = $entity->positions()
+                    ->whereIn('device_id', $entity->devices()->where('role', 'protected')->pluck('device_id'))
+                    ->where('recorded_at', '>=', $threshold)
+                    ->orderByDesc('recorded_at')
+                    ->first();
+
+                $companionPos = $entity->positions()
+                    ->whereIn('device_id', $entity->devices()->where('role', 'companion')->pluck('device_id'))
+                    ->where('recorded_at', '>=', $threshold)
+                    ->orderByDesc('recorded_at')
+                    ->first();
+
+                AdventureEvent::create([
+                    'entity_id' => $entity->id,
+                    'type' => 'wellness_check',
+                    'reason' => 'companion_far',
+                    'status' => 'pending',
+                    'requested_at' => now(),
+                    'metadata' => [
+                        'distance_meters' => $dist,
+                        'protected_device_id' => $protectedPos?->device_id,
+                        'companion_device_id' => $companionPos?->device_id,
+                        'latitude' => $protectedPos?->latitude,
+                        'longitude' => $protectedPos?->longitude,
+                    ],
+                ]);
+            }
+        }
     }
 
     public function escalatePending(): void
