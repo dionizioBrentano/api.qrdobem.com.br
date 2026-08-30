@@ -47,6 +47,44 @@ class AdventureMonitorService
         return null;
     }
 
+    public function activeWindows(Routine $routine, \Carbon\Carbon $at): \Illuminate\Support\Collection
+    {
+        $dayOfWeek = $at->dayOfWeek; // 0 (Domingo) a 6 (Sábado)
+
+        return $routine->windows()->where('day_of_week', $dayOfWeek)->get()->filter(function ($window) use ($at) {
+            $start = \Carbon\Carbon::parse($window->start_time)->setDate($at->year, $at->month, $at->day);
+            $end = \Carbon\Carbon::parse($window->end_time)->setDate($at->year, $at->month, $at->day);
+
+            $tolerance = $window->tolerance_minutes ?? 0;
+            $start->subMinutes($tolerance);
+            $end->addMinutes($tolerance);
+
+            if ($end->lessThan($start)) {
+                // Atravessa a meia-noite
+                return $at->greaterThanOrEqualTo($start) || $at->lessThanOrEqualTo($end);
+            }
+
+            return $at->between($start, $end);
+        })->values();
+    }
+
+    private function createOffRoute(Entity $entity, EntityPosition $lastPosition, $routineId, $windowId = null): void
+    {
+        AdventureEvent::create([
+            'entity_id' => $entity->id,
+            'type' => 'wellness_check',
+            'reason' => 'off_route',
+            'status' => 'pending',
+            'requested_at' => now(),
+            'metadata' => array_filter([
+                'latitude' => $lastPosition->latitude,
+                'longitude' => $lastPosition->longitude,
+                'routine_id' => $routineId,
+                'routine_window_id' => $windowId,
+            ]),
+        ]);
+    }
+
     public function evaluate(Entity $entity): void
     {
         // 1. Última posição
@@ -60,7 +98,7 @@ class AdventureMonitorService
             return;
         }
 
-        // 5. ANTI-SPAM (Único return cedo além do item 1)
+        // Anti-spam (Único return cedo além do item 1)
         $hasPendingCheck = AdventureEvent::where('entity_id', $entity->id)
             ->where('type', 'wellness_check')
             ->where('status', 'pending')
@@ -73,44 +111,76 @@ class AdventureMonitorService
         // 2. Rotinas ativas da entity
         $routines = $entity->routines()->where('is_active', true)->get();
         if ($routines->isEmpty()) {
-            return; // Se não tem rotina ativa, não avalia. (ou o prompt não diz para retornar aqui, mas se não há rotina não há ponto)
+            return;
         }
 
-        $insideTrail = false;
-        $skipAlert = false;
-        $routineIdForMetadata = $routines->first()->id;
+        $now = now();
+        $offRouteCreated = false;
 
         foreach ($routines as $routine) {
-            $point = $this->isInsideAnyPoint($routine, $lastPosition);
-            if ($point) {
-                $insideTrail = true;
-                if ($routine->skip_alert_inside_trail) {
-                    $skipAlert = true;
+            $windows = $routine->windows;
+
+            // 3. PRESENÇA
+            if ($windows->isEmpty()) {
+                // a) rotina SEM nenhuma janela -> mantém o passo 10
+                $isInside = $this->isInsideAnyPoint($routine, $lastPosition) !== null;
+
+                if (!$isInside && !$offRouteCreated) {
+                    $this->createOffRoute($entity, $lastPosition, $routine->id);
+                    $offRouteCreated = true;
+                }
+            } else {
+                $activeWindows = $this->activeWindows($routine, $now);
+
+                if ($activeWindows->isEmpty()) {
+                    // b) NENHUMA valendo agora -> NÃO cria off_route e SEGUE EM FRENTE.
+                    continue;
+                }
+
+                // c) há janela valendo
+                $isInsideActiveWindow = false;
+                $failedWindowId = null;
+
+                foreach ($activeWindows as $window) {
+                    if ($window->entity_reference_point_id) {
+                        // com entity_reference_point_id -> só aquele ponto conta
+                        $point = $window->point;
+                        if ($point) {
+                            $distance = $this->distanceMeters(
+                                $point->latitude, $point->longitude,
+                                $lastPosition->latitude, $lastPosition->longitude
+                            );
+                            if ($distance <= $point->radius_meters) {
+                                $isInsideActiveWindow = true;
+                                break;
+                            }
+                        }
+                    } else {
+                        // sem ponto -> qualquer ponto da rotina
+                        if ($this->isInsideAnyPoint($routine, $lastPosition)) {
+                            $isInsideActiveWindow = true;
+                            break;
+                        }
+                    }
+                    $failedWindowId = $window->id;
+                }
+
+                if (!$isInsideActiveWindow && !$offRouteCreated) {
+                    $isInsideAny = $this->isInsideAnyPoint($routine, $lastPosition) !== null;
+                    
+                    // skip_alert_inside_trail continua valendo quando está DENTRO.
+                    if ($isInsideAny && $routine->skip_alert_inside_trail) {
+                        // Está dentro da rotina, não cria alerta.
+                    } else {
+                        // fora -> wellness_check
+                        $this->createOffRoute($entity, $lastPosition, $routine->id, $failedWindowId);
+                        $offRouteCreated = true;
+                    }
                 }
             }
         }
-
-        // 3. PRESENÇA
-        // Se achou ponto e skip_alert_inside_trail for true -> NÃO cria off_route.
-        // Este if não dá return/break para permitir passos 12 e 14 depois.
-        if ($insideTrail && $skipAlert) {
-            // Futuros checks de horário são ignorados aqui
-        } else {
-            // 4. Fora de todos os pontos -> cria off_route
-            if (!$insideTrail) {
-                AdventureEvent::create([
-                    'entity_id' => $entity->id,
-                    'type' => 'wellness_check',
-                    'reason' => 'off_route',
-                    'status' => 'pending',
-                    'requested_at' => now(),
-                    'metadata' => [
-                        'latitude' => $lastPosition->latitude,
-                        'longitude' => $lastPosition->longitude,
-                        'routine_id' => $routineIdForMetadata,
-                    ],
-                ]);
-            }
-        }
+        
+        // O QUE NÃO DESLIGA (blocos futuros 12 e 14):
+        // imobilidade e afastamento do acompanhante continuam em qualquer horário.
     }
 }
