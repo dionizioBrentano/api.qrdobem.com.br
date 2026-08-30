@@ -142,4 +142,9 @@ class Entity extends Model
     {
         return $this->hasMany(EntityPosition::class);
     }
+
+    public function devices(): HasMany
+    {
+        return $this->hasMany(EntityDevice::class);
+    }
 }
