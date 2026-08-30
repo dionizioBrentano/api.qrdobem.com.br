@@ -28,6 +28,7 @@ use App\Http\Controllers\CreditController;
 use App\Http\Controllers\WebhookController;
 use App\Http\Controllers\PositionController;
 use App\Http\Controllers\DeviceController;
+use App\Http\Controllers\WellnessCheckController;
 
 // CORS é tratado exclusivamente pelo middleware HandleCors do Laravel (config/cors.php)
 // NÃO adicionar headers manuais aqui — isso causa duplicação e bloqueio no browser.
@@ -220,6 +221,11 @@ Route::middleware('auth.firebase')->group(function () {
     Route::post('/entities/{unique_code}/devices', [DeviceController::class, 'store']);
     Route::put('/entities/{unique_code}/devices/{device}', [DeviceController::class, 'update']);
     Route::delete('/entities/{unique_code}/devices/{device}', [DeviceController::class, 'destroy']);
+
+    Route::get('/entities/{unique_code}/wellness-checks', [WellnessCheckController::class, 'index']);
+    Route::get('/entities/{unique_code}/wellness-checks/pending', [WellnessCheckController::class, 'pending']);
+    Route::post('/entities/{unique_code}/wellness-checks', [WellnessCheckController::class, 'store']);
+    Route::post('/entities/{unique_code}/wellness-checks/{check}/respond', [WellnessCheckController::class, 'respond']);
 
     // Decifragem do CPF de quem declarou emergência (superadmin, auditado)
     Route::get('/admin/emergency-declarations/{id}/reveal', [EmergencyController::class, 'reveal']);
