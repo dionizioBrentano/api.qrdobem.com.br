@@ -16,10 +16,17 @@ class EntityDevice extends Model
         'label',
         'role',
         'last_seen_at',
+        'token_hash',
+        'token_expires_at',
+    ];
+
+    protected $hidden = [
+        'token_hash',
     ];
 
     protected $casts = [
         'last_seen_at' => 'datetime',
+        'token_expires_at' => 'datetime',
     ];
 
     public function entity(): BelongsTo

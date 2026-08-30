@@ -142,4 +142,54 @@ class DeviceController extends Controller
 
         return response()->json(['message' => 'Dispositivo removido com sucesso.']);
     }
+
+    public function issueToken(Request $request, $unique_code, $device_id)
+    {
+        $entity = $this->resolveEntity($request, $unique_code);
+
+        if (!$entity) {
+            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
+        }
+
+        if ($entity->type !== 'person') {
+            return response()->json(['error' => 'Trilha Aventura suportada apenas para pessoas.'], 400);
+        }
+
+        $device = $entity->devices()->findOrFail($device_id);
+
+        $plainTextToken = \Illuminate\Support\Str::random(40);
+        $hashedToken = hash('sha256', $plainTextToken);
+
+        $device->update([
+            'token_hash' => $hashedToken,
+            'token_expires_at' => null, // Never expires by default, can be revoked
+        ]);
+
+        return response()->json([
+            'device' => $device,
+            'token' => $plainTextToken
+        ]);
+    }
+
+    public function revokeToken(Request $request, $unique_code, $device_id)
+    {
+        $entity = $this->resolveEntity($request, $unique_code);
+
+        if (!$entity) {
+            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
+        }
+
+        if ($entity->type !== 'person') {
+            return response()->json(['error' => 'Trilha Aventura suportada apenas para pessoas.'], 400);
+        }
+
+        $device = $entity->devices()->findOrFail($device_id);
+
+        $device->update([
+            'token_hash' => null,
+            'token_expires_at' => null,
+        ]);
+
+        return response()->json(['message' => 'Token revogado com sucesso.']);
+    }
 }

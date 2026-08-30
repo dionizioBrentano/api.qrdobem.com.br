@@ -221,6 +221,8 @@ Route::middleware('auth.firebase')->group(function () {
     Route::post('/entities/{unique_code}/devices', [DeviceController::class, 'store']);
     Route::put('/entities/{unique_code}/devices/{device}', [DeviceController::class, 'update']);
     Route::delete('/entities/{unique_code}/devices/{device}', [DeviceController::class, 'destroy']);
+    Route::post('/entities/{unique_code}/devices/{device}/token', [DeviceController::class, 'issueToken']);
+    Route::delete('/entities/{unique_code}/devices/{device}/token', [DeviceController::class, 'revokeToken']);
 
     Route::get('/entities/{unique_code}/wellness-checks', [WellnessCheckController::class, 'index']);
     Route::get('/entities/{unique_code}/wellness-checks/pending', [WellnessCheckController::class, 'pending']);
@@ -394,3 +396,12 @@ Route::post('/entities/{unique_code}/panic', [PanicController::class, 'triggerPu
 // Declaração de emergência (pública)
 Route::post('/entities/{unique_code}/declare-emergency', [EmergencyController::class, 'declare'])
     ->middleware('throttle:public-messages');
+
+// --- Acesso restrito do Aparelho da Criança/Acompanhante ---
+Route::middleware('device.token')->group(function () {
+    Route::post('/device/positions', [\App\Http\Controllers\DeviceAccessController::class, 'storePosition']);
+    Route::get('/device/positions/latest', [\App\Http\Controllers\DeviceAccessController::class, 'latestPosition']);
+    Route::get('/device/wellness-checks/pending', [\App\Http\Controllers\DeviceAccessController::class, 'pendingWellnessCheck']);
+    Route::post('/device/wellness-checks/{check}/respond', [\App\Http\Controllers\DeviceAccessController::class, 'respondWellnessCheck']);
+    Route::put('/device/me', [\App\Http\Controllers\DeviceAccessController::class, 'updateDevice']);
+});

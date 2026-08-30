@@ -28,6 +28,8 @@ return Application::configure(basePath: dirname(__DIR__))
             // Assim a rota declara o que precisa, e a verificação não fica
             // espalhada dentro dos controllers.
             'api.key' => \App\Http\Middleware\ApiKeyAuth::class,
+
+            'device.token' => \App\Http\Middleware\DeviceTokenAuth::class,
         ]);
 
         // Rate limiting global para API
