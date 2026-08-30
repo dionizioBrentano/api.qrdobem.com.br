@@ -68,6 +68,69 @@ class AdventureMonitorService
         })->values();
     }
 
+    public function isIdle(Entity $entity, int $minutes, int $toleranceMeters): bool
+    {
+        $since = now()->subMinutes($minutes);
+
+        $positions = $entity->positions()
+            ->where('recorded_at', '>=', $since)
+            ->orderBy('recorded_at', 'asc')
+            ->get();
+
+        if ($positions->count() < 3) {
+            return false;
+        }
+
+        $first = $positions->first();
+
+        foreach ($positions as $pos) {
+            $dist = $this->distanceMeters(
+                $first->latitude, $first->longitude,
+                $pos->latitude, $pos->longitude
+            );
+            
+            if ($dist > $toleranceMeters) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    public function shouldChargeIdle(Routine $routine, EntityPosition $position, \Carbon\Carbon $at): bool
+    {
+        $activeWindows = $this->activeWindows($routine, $at);
+
+        foreach ($activeWindows as $window) {
+            if ($window->expects_movement === false) {
+                $isInside = false;
+                
+                if ($window->entity_reference_point_id) {
+                    $point = $window->point;
+                    if ($point) {
+                        $distance = $this->distanceMeters(
+                            $point->latitude, $point->longitude,
+                            $position->latitude, $position->longitude
+                        );
+                        if ($distance <= $point->radius_meters) {
+                            $isInside = true;
+                        }
+                    }
+                } else {
+                    if ($this->isInsideAnyPoint($routine, $position)) {
+                        $isInside = true;
+                    }
+                }
+
+                if ($isInside) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
     private function createOffRoute(Entity $entity, EntityPosition $lastPosition, $routineId, $windowId = null): void
     {
         AdventureEvent::create([
@@ -180,7 +243,39 @@ class AdventureMonitorService
             }
         }
         
-        // O QUE NÃO DESLIGA (blocos futuros 12 e 14):
-        // imobilidade e afastamento do acompanhante continuam em qualquer horário.
+        // 12. IMOBILIDADE
+        // Hoje a decisão é só GPS; acelerômetro é melhoria futura do front.
+        
+        if (!$offRouteCreated) {
+            $chargeIdle = true;
+            foreach ($routines as $routine) {
+                if (!$this->shouldChargeIdle($routine, $lastPosition, $now)) {
+                    $chargeIdle = false;
+                    break;
+                }
+            }
+
+            if ($chargeIdle) {
+                $idleMinutes = config('adventure.idle_minutes');
+                $idleTolerance = config('adventure.idle_tolerance_meters');
+
+                if ($this->isIdle($entity, $idleMinutes, $idleTolerance)) {
+                    AdventureEvent::create([
+                        'entity_id' => $entity->id,
+                        'type' => 'wellness_check',
+                        'reason' => 'idle',
+                        'status' => 'pending',
+                        'requested_at' => now(),
+                        'metadata' => [
+                            'latitude' => $lastPosition->latitude,
+                            'longitude' => $lastPosition->longitude,
+                        ],
+                    ]);
+                }
+            }
+        }
+        
+        // O QUE NÃO DESLIGA (blocos futuros 14):
+        // afastamento do acompanhante continuam em qualquer horário.
     }
 }
