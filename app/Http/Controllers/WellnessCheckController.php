@@ -150,4 +150,65 @@ class WellnessCheckController extends Controller
 
         return response()->json($check);
     }
+
+    public function spaceIndex(Request $request, $spaceId)
+    {
+        $space = Space::find($spaceId);
+
+        if (!$space) {
+            return response()->json(['error' => 'Espaço não encontrado.'], 404);
+        }
+
+        app(SpacePolicy::class)->authorize($request->tenant, $space, 'entity.view');
+
+        $entityIds = Entity::where('type', 'person')
+            ->where(function ($query) use ($space) {
+                $query->where('space_id', $space->id);
+                if ($space->organization_id) {
+                    $query->orWhere('organization_id', $space->organization_id);
+                }
+            })
+            ->pluck('id');
+
+        $query = AdventureEvent::with('entity')
+            ->whereIn('entity_id', $entityIds)
+            ->where('type', 'wellness_check')
+            ->orderByDesc('id');
+
+        if ($request->filled('status')) {
+            $query->where('status', $request->input('status'));
+        }
+
+        if ($request->filled('reason')) {
+            $query->where('reason', $request->input('reason'));
+        }
+
+        if ($request->filled('from')) {
+            $query->whereDate('requested_at', '>=', $request->input('from'));
+        }
+
+        if ($request->filled('to')) {
+            $query->whereDate('requested_at', '<=', $request->input('to'));
+        }
+
+        $checks = $query->paginate();
+
+        $checks->getCollection()->transform(function ($check) {
+            return [
+                'id' => $check->id,
+                'entity' => [
+                    'unique_code' => $check->entity->unique_code,
+                    'name' => $check->entity->encrypted_name,
+                ],
+                'reason' => $check->reason,
+                'status' => $check->status,
+                'requested_at' => $check->requested_at ? $check->requested_at->toIso8601String() : null,
+                'responded_at' => $check->responded_at ? $check->responded_at->toIso8601String() : null,
+                'latitude' => $check->metadata['latitude'] ?? null,
+                'longitude' => $check->metadata['longitude'] ?? null,
+            ];
+        });
+
+        return response()->json($checks);
+    }
 }

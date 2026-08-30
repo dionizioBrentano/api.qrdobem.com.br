@@ -227,6 +227,8 @@ Route::middleware('auth.firebase')->group(function () {
     Route::post('/entities/{unique_code}/wellness-checks', [WellnessCheckController::class, 'store']);
     Route::post('/entities/{unique_code}/wellness-checks/{check}/respond', [WellnessCheckController::class, 'respond']);
 
+    Route::get('/spaces/{space}/wellness-checks', [WellnessCheckController::class, 'spaceIndex']);
+
     // Decifragem do CPF de quem declarou emergência (superadmin, auditado)
     Route::get('/admin/emergency-declarations/{id}/reveal', [EmergencyController::class, 'reveal']);
 
