@@ -32,13 +32,13 @@ class EntityReadProcessor
     private function detectReadSpike(EntityRead $read, Entity $entity): void
     {
         $recentReadsCount = EntityRead::where('entity_id', $entity->id)
-            ->where('read_at', '>=', now()->subMinutes(15))
+            ->where('read_at', '>=', now()->subMinutes((int) config('qrdobem.read_dedup_minutes')))
             ->count();
 
         if ($recentReadsCount >= 5) {
             $recentAlert = EntityAlert::where('entity_id', $entity->id)
                 ->where('type', 'read_spike')
-                ->where('created_at', '>=', now()->subMinutes(15))
+                ->where('created_at', '>=', now()->subMinutes((int) config('qrdobem.read_dedup_minutes')))
                 ->exists();
 
             if (!$recentAlert) {

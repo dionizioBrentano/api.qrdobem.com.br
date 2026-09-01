@@ -91,4 +91,8 @@ return [
         'platform_fee_percent' => (float) env('DONATION_PLATFORM_FEE_PERCENT', 12),
     ],
 
+    'otp_minutes' => (int) env('QR_OTP_MINUTES', 15),
+
+    'read_dedup_minutes' => (int) env('QR_READ_DEDUP_MINUTES', 15),
+
 ];

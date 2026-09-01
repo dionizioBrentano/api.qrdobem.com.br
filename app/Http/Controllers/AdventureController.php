@@ -42,14 +42,14 @@ class AdventureController extends Controller
             'name' => 'required|string|max:100',
             'latitude' => 'required|numeric',
             'longitude' => 'required|numeric',
-            'radius_meters' => 'nullable|integer|min:10',
+            'radius_meters' => 'nullable|integer|min:' . (int) config('adventure.min_radius_meters'),
             'days_of_week' => 'nullable|array',
             'start_time' => 'nullable|date_format:H:i',
             'end_time' => 'nullable|date_format:H:i',
         ]);
 
         if (!isset($validated['radius_meters'])) {
-            $validated['radius_meters'] = 50;
+            $validated['radius_meters'] = (int) config('adventure.default_radius_meters');
         }
 
         $point = $entity->referencePoints()->create($validated);

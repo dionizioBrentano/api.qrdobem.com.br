@@ -32,7 +32,7 @@ class OtpController extends Controller
             'firebase_uid' => $uid,
             'email' => $email,
             'code' => $code,
-            'expires_at' => Carbon::now()->addMinutes(15)
+            'expires_at' => Carbon::now()->addMinutes((int) config('qrdobem.otp_minutes'))
         ]);
 
         try {

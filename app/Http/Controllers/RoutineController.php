@@ -164,13 +164,13 @@ class RoutineController extends Controller
             'address' => 'nullable|string|max:255',
             'latitude' => 'required|numeric',
             'longitude' => 'required|numeric',
-            'radius_meters' => 'nullable|integer|min:10',
+            'radius_meters' => 'nullable|integer|min:' . (int) config('adventure.min_radius_meters'),
             'order_index' => 'nullable|integer|min:0',
         ]);
 
         $validated['entity_id'] = $entity->id;
         $validated['routine_id'] = $routine->id;
-        $validated['radius_meters'] = $validated['radius_meters'] ?? 50;
+        $validated['radius_meters'] = $validated['radius_meters'] ?? (int) config('adventure.default_radius_meters');
         $validated['order_index'] = $validated['order_index'] ?? 0;
 
         $point = EntityReferencePoint::create($validated);
@@ -200,7 +200,7 @@ class RoutineController extends Controller
             'address' => 'nullable|string|max:255',
             'latitude' => 'sometimes|required|numeric',
             'longitude' => 'sometimes|required|numeric',
-            'radius_meters' => 'nullable|integer|min:10',
+            'radius_meters' => 'nullable|integer|min:' . (int) config('adventure.min_radius_meters'),
             'order_index' => 'nullable|integer|min:0',
         ]);
 
@@ -263,7 +263,7 @@ class RoutineController extends Controller
             'day_of_week' => 'required|integer|between:0,6',
             'start_time' => 'required|date_format:H:i',
             'end_time' => 'required|date_format:H:i',
-            'tolerance_minutes' => 'nullable|integer|min:0|max:240',
+            'tolerance_minutes' => 'nullable|integer|min:0|max:' . (int) config('adventure.max_tolerance_minutes'),
             'expects_movement' => 'nullable|boolean',
         ]);
 
@@ -277,7 +277,7 @@ class RoutineController extends Controller
         }
 
         $validated['routine_id'] = $routine->id;
-        $validated['tolerance_minutes'] = $validated['tolerance_minutes'] ?? 15;
+        $validated['tolerance_minutes'] = $validated['tolerance_minutes'] ?? (int) config('adventure.default_tolerance_minutes');
         $validated['expects_movement'] = $validated['expects_movement'] ?? true;
 
         $window = RoutineWindow::create($validated);
@@ -307,7 +307,7 @@ class RoutineController extends Controller
             'day_of_week' => 'sometimes|required|integer|between:0,6',
             'start_time' => 'sometimes|required|date_format:H:i',
             'end_time' => 'sometimes|required|date_format:H:i',
-            'tolerance_minutes' => 'nullable|integer|min:0|max:240',
+            'tolerance_minutes' => 'nullable|integer|min:0|max:' . (int) config('adventure.max_tolerance_minutes'),
             'expects_movement' => 'nullable|boolean',
         ]);
 
