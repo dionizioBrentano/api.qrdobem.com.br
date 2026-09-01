@@ -1284,12 +1284,12 @@ class EntityController extends Controller
         }
 
         $extension = match ($mime) {
-            'image/jpeg'      => 'jpg',
-            'image/png'       => 'png',
-            'image/webp'      => 'webp',
-            'video/mp4'       => 'mp4',
-            'video/quicktime' => 'mov',
-            default           => 'bin',
+            'image/jpeg', 'image/jpg' => 'jpg',
+            'image/png'               => 'png',
+            'image/webp'              => 'webp',
+            'video/mp4'               => 'mp4',
+            'video/quicktime'         => 'mov',
+            default                   => 'bin',
         };
 
         $filename  = \Illuminate\Support\Str::uuid() . '.' . $extension;

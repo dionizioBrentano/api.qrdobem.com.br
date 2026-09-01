@@ -30,6 +30,7 @@ class MediaItem extends Model
     /** Tipos aceitos. Lista fechada: o que não está aqui é recusado. */
     public const ALLOWED_MIMES = [
         'image/jpeg',
+        'image/jpg',
         'image/png',
         'image/webp',
         'video/mp4',
