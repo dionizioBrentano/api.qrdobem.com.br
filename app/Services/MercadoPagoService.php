@@ -12,6 +12,11 @@ class MercadoPagoService
     /**
      * Retorna o access token baseado no mode atual.
      */
+        private function buildUrl(string $path): string
+    {
+        return config('mercadopago.base_url') . '/' . ltrim($path, '/');
+    }
+
     private function getAccessToken(): string
     {
         $mode = config('mercadopago.mode');
@@ -70,7 +75,7 @@ class MercadoPagoService
             $response = Http::withToken($token)
                 ->timeout(10)
                 ->connectTimeout(5)
-                ->post('https://api.mercadopago.com/checkout/preferences', $payload);
+                ->post($this->buildUrl('checkout/preferences'), $payload);
         } catch (ConnectionException $e) {
             Log::error('MercadoPago createPreference: timeout/conexão', [
                 'external_reference' => $order->external_reference,
@@ -144,7 +149,7 @@ class MercadoPagoService
                 ->withHeaders([
                     'X-Idempotency-Key' => $order->external_reference,
                 ])
-                ->post('https://api.mercadopago.com/v1/payments', $payload);
+                ->post($this->buildUrl('v1/payments'), $payload);
         } catch (ConnectionException $e) {
             Log::error('MercadoPago createPixPayment: timeout/conexão', [
                 'external_reference' => $order->external_reference,
@@ -221,7 +226,7 @@ class MercadoPagoService
                 ->withHeaders([
                     'X-Idempotency-Key' => $order->external_reference,
                 ])
-                ->post('https://api.mercadopago.com/v1/payments', $payload);
+                ->post($this->buildUrl('v1/payments'), $payload);
         } catch (ConnectionException $e) {
             Log::error('MercadoPago createCardPayment: timeout/conexão', [
                 'external_reference' => $order->external_reference,
@@ -301,7 +306,7 @@ class MercadoPagoService
                 ->withHeaders([
                     'X-Idempotency-Key' => $reference,
                 ])
-                ->post('https://api.mercadopago.com/v1/payments', $payload);
+                ->post($this->buildUrl('v1/payments'), $payload);
         } catch (ConnectionException $e) {
             Log::error('MercadoPago createDonationPixPayment: timeout/conexão', [
                 'external_reference' => $reference,
@@ -381,7 +386,7 @@ class MercadoPagoService
                 ->withHeaders([
                     'X-Idempotency-Key' => $reference,
                 ])
-                ->post('https://api.mercadopago.com/v1/payments', $payload);
+                ->post($this->buildUrl('v1/payments'), $payload);
         } catch (ConnectionException $e) {
             Log::error('MercadoPago createDonationCardPayment: timeout/conexão', [
                 'external_reference' => $reference,
@@ -444,7 +449,7 @@ class MercadoPagoService
             $response = Http::withToken($token)
                 ->timeout(10)
                 ->connectTimeout(5)
-                ->post('https://api.mercadopago.com/preapproval', $payload);
+                ->post($this->buildUrl('preapproval'), $payload);
         } catch (ConnectionException $e) {
             Log::error('MercadoPago createPreapproval: timeout/conexão', [
                 'subscription_id' => $subscription->id,
@@ -486,7 +491,7 @@ class MercadoPagoService
                 ->timeout(10)
                 ->connectTimeout(5)
                 ->put(
-                    'https://api.mercadopago.com/preapproval/' . $subscription->mp_preapproval_id,
+                    $this->buildUrl('preapproval/' . $subscription->mp_preapproval_id),
                     ['status' => 'cancelled']
                 );
         } catch (ConnectionException $e) {
@@ -520,7 +525,7 @@ class MercadoPagoService
             $response = Http::withToken($token)
                 ->timeout(10)
                 ->connectTimeout(5)
-                ->get("https://api.mercadopago.com/v1/payments/{$id}");
+                ->get($this->buildUrl('/v1/payments/' . $id));
         } catch (ConnectionException $e) {
             Log::error('MercadoPago getPayment: timeout/conexão', [
                 'payment_id' => $id,

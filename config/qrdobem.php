@@ -95,6 +95,8 @@ return [
 
     'read_dedup_minutes' => (int) env('QR_READ_DEDUP_MINUTES', 15),
 
+    'maps_url' => env('QR_MAPS_URL', 'https://www.google.com/maps?q=%s,%s'),
+
     'composite' => [
         'background' => env('QR_COMPOSITE_BG', '#ffffff'),
         'caption_color' => env('QR_COMPOSITE_CAPTION', '#000000'),

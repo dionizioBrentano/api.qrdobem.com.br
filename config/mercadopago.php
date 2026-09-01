@@ -14,4 +14,6 @@ return [
         'min_qty' => env('CREDITS_MIN_QTY', 1),
         'max_qty' => env('CREDITS_MAX_QTY', 500),
     ],
+
+    'base_url' => rtrim(env('MERCADOPAGO_BASE_URL', 'https://api.mercadopago.com'), '/'),
 ];

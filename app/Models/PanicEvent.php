@@ -71,6 +71,6 @@ class PanicEvent extends Model
             return null;
         }
 
-        return "https://www.google.com/maps?q={$this->latitude},{$this->longitude}";
+        return \App\Support\Geo::mapsUrl($this->latitude, $this->longitude);
     }
 }

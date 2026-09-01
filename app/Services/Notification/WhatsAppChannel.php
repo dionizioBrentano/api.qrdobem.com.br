@@ -100,12 +100,13 @@ class WhatsAppChannel implements NotificationChannel
         ];
 
         try {
+            $graphBase = rtrim(config('services.whatsapp.graph_base', 'https://graph.facebook.com'), '/');
             $response = Http::withToken(config('services.whatsapp.access_token'))
                 // Timeout curto: numa emergência, esperar 30s por um
                 // destinatário atrasa os outros da fila de disparo.
                 ->timeout(10)
                 ->connectTimeout(5)
-                ->post("https://graph.facebook.com/{$version}/{$phoneNumberId}/messages", $payload);
+                ->post("{$graphBase}/{$version}/{$phoneNumberId}/messages", $payload);
         } catch (\Throwable $e) {
             Log::error('WhatsAppChannel: falha de conexão', [
                 'to'    => $this->maskPhone($phone),

@@ -49,7 +49,7 @@ class EntityEmergencyDeclaration extends Model
     public function mapsUrl(): ?string
     {
         if ($this->latitude && $this->longitude) {
-            return "https://www.google.com/maps/search/?api=1&query={$this->latitude},{$this->longitude}";
+            return \App\Support\Geo::mapsUrl($this->latitude, $this->longitude);
         }
         return null;
     }

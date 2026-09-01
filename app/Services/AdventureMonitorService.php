@@ -385,7 +385,7 @@ class AdventureMonitorService
             $lat = $event->metadata['latitude'] ?? null;
             $lng = $event->metadata['longitude'] ?? null;
             
-            $mapsUrl = ($lat && $lng) ? "https://maps.google.com/?q={$lat},{$lng}" : null;
+            $mapsUrl = \App\Support\Geo::mapsUrl($lat, $lng);
             $locationText = ($lat && $lng) ? "{$lat}, {$lng}" : 'não informada';
 
             $body = "ALERTA DE CHECAGEM SEM RESPOSTA\n\n"
