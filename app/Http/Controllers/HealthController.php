@@ -6,8 +6,7 @@ use App\Models\Entity;
 use App\Models\HealthDiaryEntry;
 use App\Models\Medication;
 use App\Models\Prescription;
-use App\Models\Space;
-use App\Policies\SpacePolicy;
+
 use App\Services\IcsCalendarService;
 use App\Services\MedicationLookupService;
 use Illuminate\Http\Request;
@@ -217,9 +216,13 @@ class HealthController extends Controller
         }
 
         $entity = Entity::find($prescription->entity_id);
-        $check = $this->authorizeEntity($request, $entity, 'entity.edit');
+        if (!$entity) {
+            return response()->json(['error' => 'Registro não encontrado.'], 404);
+        }
 
-        if ($check !== null) {
+        $check = $this->authorizedEntity($request, $entity->unique_code, 'entity.edit');
+
+        if (!$check instanceof Entity) {
             return $check;
         }
 
@@ -260,9 +263,13 @@ class HealthController extends Controller
         }
 
         $entity = Entity::find($prescription->entity_id);
-        $check = $this->authorizeEntity($request, $entity, 'entity.view');
+        if (!$entity) {
+            return response()->json(['error' => 'Registro não encontrado.'], 404);
+        }
 
-        if ($check !== null) {
+        $check = $this->authorizedEntity($request, $entity->unique_code, 'entity.view');
+
+        if (!$check instanceof Entity) {
             return $check;
         }
 
@@ -351,45 +358,13 @@ class HealthController extends Controller
      */
     private function authorizedEntity(Request $request, string $uniqueCode, string $permission)
     {
-        $entity = Entity::where('unique_code', $uniqueCode)->first();
+        $entity = app(\App\Services\EntityAccessService::class)
+            ->resolveEntity($request->tenant, $uniqueCode, $permission);
 
         if (!$entity) {
             return response()->json(['error' => 'Registro não encontrado.'], 404);
         }
 
-        $check = $this->authorizeEntity($request, $entity, $permission);
-
-        return $check ?? $entity;
-    }
-
-    /**
-     * Verificação de permissão. Devolve null quando está liberado.
-     *
-     * Aceita o caminho antigo (pertencer à organização) além do espaço:
-     * entidade que o backfill ainda não ligou continua acessível ao dono.
-     */
-    private function authorizeEntity(Request $request, ?Entity $entity, string $permission)
-    {
-        if (!$entity) {
-            return response()->json(['error' => 'Registro não encontrado.'], 404);
-        }
-
-        $tenant = $request->tenant;
-
-        $orgIds = $tenant->organizations()->pluck('organizations.id')->all();
-
-        if (in_array($entity->organization_id, $orgIds, true)) {
-            return null;
-        }
-
-        if ($entity->space_id) {
-            $space = Space::find($entity->space_id);
-
-            if ($space && app(SpacePolicy::class)->check($tenant, $space, $permission)) {
-                return null;
-            }
-        }
-
-        return response()->json(['error' => 'Acesso negado.'], 403);
+        return $entity;
     }
 }
