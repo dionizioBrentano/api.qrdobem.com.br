@@ -3,7 +3,6 @@
 namespace App\Http\Controllers;
 
 use App\Models\Entity;
-use App\Models\CreditBatch;
 use App\Models\Space;
 use App\Models\AdventureEvent;
 use App\Policies\SpacePolicy;
@@ -11,16 +10,12 @@ use Illuminate\Http\Request;
 
 class WellnessCheckController extends Controller
 {
+    use \App\Http\Controllers\Concerns\ResolvesAdventureEntity;
     public function index(Request $request, $unique_code)
     {
-        $entity = app(\App\Services\EntityAccessService::class)->resolveEntity($request->tenant, $unique_code);
-
-        if (!$entity) {
-            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
-        }
-
-        if ($entity->type !== 'person') {
-            return response()->json(['error' => 'Trilha Aventura suportada apenas para pessoas.'], 400);
+        $entity = $this->adventureEntity($request, $unique_code);
+        if ($entity instanceof \Illuminate\Http\JsonResponse) {
+            return $entity;
         }
 
         $checks = AdventureEvent::where('entity_id', $entity->id)
@@ -33,14 +28,9 @@ class WellnessCheckController extends Controller
 
     public function pending(Request $request, $unique_code)
     {
-        $entity = app(\App\Services\EntityAccessService::class)->resolveEntity($request->tenant, $unique_code);
-
-        if (!$entity) {
-            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
-        }
-
-        if ($entity->type !== 'person') {
-            return response()->json(['error' => 'Trilha Aventura suportada apenas para pessoas.'], 400);
+        $entity = $this->adventureEntity($request, $unique_code);
+        if ($entity instanceof \Illuminate\Http\JsonResponse) {
+            return $entity;
         }
 
         $pending = AdventureEvent::where('entity_id', $entity->id)
@@ -58,14 +48,9 @@ class WellnessCheckController extends Controller
 
     public function store(Request $request, $unique_code)
     {
-        $entity = app(\App\Services\EntityAccessService::class)->resolveEntity($request->tenant, $unique_code);
-
-        if (!$entity) {
-            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
-        }
-
-        if ($entity->type !== 'person') {
-            return response()->json(['error' => 'Trilha Aventura suportada apenas para pessoas.'], 400);
+        $entity = $this->adventureEntity($request, $unique_code);
+        if ($entity instanceof \Illuminate\Http\JsonResponse) {
+            return $entity;
         }
 
         $check = AdventureEvent::create([
@@ -82,14 +67,9 @@ class WellnessCheckController extends Controller
 
     public function respond(Request $request, $unique_code, $check_id)
     {
-        $entity = app(\App\Services\EntityAccessService::class)->resolveEntity($request->tenant, $unique_code);
-
-        if (!$entity) {
-            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
-        }
-
-        if ($entity->type !== 'person') {
-            return response()->json(['error' => 'Trilha Aventura suportada apenas para pessoas.'], 400);
+        $entity = $this->adventureEntity($request, $unique_code);
+        if ($entity instanceof \Illuminate\Http\JsonResponse) {
+            return $entity;
         }
 
         $check = AdventureEvent::where('id', $check_id)

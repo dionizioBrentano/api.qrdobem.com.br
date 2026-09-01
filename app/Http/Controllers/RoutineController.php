@@ -2,25 +2,14 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\CreditBatch;
-use App\Models\Entity;
 use App\Models\EntityReferencePoint;
 use App\Models\Routine;
 use App\Models\RoutineWindow;
-use App\Models\Space;
-use App\Policies\SpacePolicy;
 use Illuminate\Http\Request;
 
 class RoutineController extends Controller
 {
-    private function personOrFail(Entity $entity)
-    {
-        if ($entity->type !== 'person') {
-            return response()->json(['error' => 'Trilha Aventura suportada apenas para pessoas.'], 400);
-        }
-
-        return null;
-    }
+    use \App\Http\Controllers\Concerns\ResolvesAdventureEntity;
 
     private function routineOf(Entity $entity, $routineId): ?Routine
     {
@@ -29,12 +18,9 @@ class RoutineController extends Controller
 
     public function index(Request $request, $unique_code)
     {
-        $entity = app(\App\Services\EntityAccessService::class)->resolveEntity($request->tenant, $unique_code);
-        if (!$entity) {
-            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
-        }
-        if ($resp = $this->personOrFail($entity)) {
-            return $resp;
+        $entity = $this->adventureEntity($request, $unique_code);
+        if ($entity instanceof \Illuminate\Http\JsonResponse) {
+            return $entity;
         }
 
         return response()->json($entity->routines()->with(['points', 'windows'])->get());
@@ -42,12 +28,9 @@ class RoutineController extends Controller
 
     public function store(Request $request, $unique_code)
     {
-        $entity = app(\App\Services\EntityAccessService::class)->resolveEntity($request->tenant, $unique_code);
-        if (!$entity) {
-            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
-        }
-        if ($resp = $this->personOrFail($entity)) {
-            return $resp;
+        $entity = $this->adventureEntity($request, $unique_code);
+        if ($entity instanceof \Illuminate\Http\JsonResponse) {
+            return $entity;
         }
 
         if ($entity->routines()->where('is_active', true)->exists()) {
@@ -80,12 +63,9 @@ class RoutineController extends Controller
 
     public function update(Request $request, $unique_code, $routine_id)
     {
-        $entity = app(\App\Services\EntityAccessService::class)->resolveEntity($request->tenant, $unique_code);
-        if (!$entity) {
-            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
-        }
-        if ($resp = $this->personOrFail($entity)) {
-            return $resp;
+        $entity = $this->adventureEntity($request, $unique_code);
+        if ($entity instanceof \Illuminate\Http\JsonResponse) {
+            return $entity;
         }
 
         $routine = $this->routineOf($entity, $routine_id);
@@ -113,9 +93,9 @@ class RoutineController extends Controller
 
     public function destroy(Request $request, $unique_code, $routine_id)
     {
-        $entity = app(\App\Services\EntityAccessService::class)->resolveEntity($request->tenant, $unique_code);
-        if (!$entity) {
-            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
+        $entity = $this->adventureEntity($request, $unique_code);
+        if ($entity instanceof \Illuminate\Http\JsonResponse) {
+            return $entity;
         }
 
         $routine = $this->routineOf($entity, $routine_id);
@@ -131,9 +111,9 @@ class RoutineController extends Controller
 
     public function listPoints(Request $request, $unique_code, $routine_id)
     {
-        $entity = app(\App\Services\EntityAccessService::class)->resolveEntity($request->tenant, $unique_code);
-        if (!$entity) {
-            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
+        $entity = $this->adventureEntity($request, $unique_code);
+        if ($entity instanceof \Illuminate\Http\JsonResponse) {
+            return $entity;
         }
 
         $routine = $this->routineOf($entity, $routine_id);
@@ -146,12 +126,9 @@ class RoutineController extends Controller
 
     public function storePoint(Request $request, $unique_code, $routine_id)
     {
-        $entity = app(\App\Services\EntityAccessService::class)->resolveEntity($request->tenant, $unique_code);
-        if (!$entity) {
-            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
-        }
-        if ($resp = $this->personOrFail($entity)) {
-            return $resp;
+        $entity = $this->adventureEntity($request, $unique_code);
+        if ($entity instanceof \Illuminate\Http\JsonResponse) {
+            return $entity;
         }
 
         $routine = $this->routineOf($entity, $routine_id);
@@ -180,9 +157,9 @@ class RoutineController extends Controller
 
     public function updatePoint(Request $request, $unique_code, $routine_id, $point_id)
     {
-        $entity = app(\App\Services\EntityAccessService::class)->resolveEntity($request->tenant, $unique_code);
-        if (!$entity) {
-            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
+        $entity = $this->adventureEntity($request, $unique_code);
+        if ($entity instanceof \Illuminate\Http\JsonResponse) {
+            return $entity;
         }
 
         $routine = $this->routineOf($entity, $routine_id);
@@ -211,9 +188,9 @@ class RoutineController extends Controller
 
     public function destroyPoint(Request $request, $unique_code, $routine_id, $point_id)
     {
-        $entity = app(\App\Services\EntityAccessService::class)->resolveEntity($request->tenant, $unique_code);
-        if (!$entity) {
-            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
+        $entity = $this->adventureEntity($request, $unique_code);
+        if ($entity instanceof \Illuminate\Http\JsonResponse) {
+            return $entity;
         }
 
         $routine = $this->routineOf($entity, $routine_id);
@@ -233,9 +210,9 @@ class RoutineController extends Controller
 
     public function listWindows(Request $request, $unique_code, $routine_id)
     {
-        $entity = app(\App\Services\EntityAccessService::class)->resolveEntity($request->tenant, $unique_code);
-        if (!$entity) {
-            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
+        $entity = $this->adventureEntity($request, $unique_code);
+        if ($entity instanceof \Illuminate\Http\JsonResponse) {
+            return $entity;
         }
 
         $routine = $this->routineOf($entity, $routine_id);
@@ -248,9 +225,9 @@ class RoutineController extends Controller
 
     public function storeWindow(Request $request, $unique_code, $routine_id)
     {
-        $entity = app(\App\Services\EntityAccessService::class)->resolveEntity($request->tenant, $unique_code);
-        if (!$entity) {
-            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
+        $entity = $this->adventureEntity($request, $unique_code);
+        if ($entity instanceof \Illuminate\Http\JsonResponse) {
+            return $entity;
         }
 
         $routine = $this->routineOf($entity, $routine_id);
@@ -287,9 +264,9 @@ class RoutineController extends Controller
 
     public function updateWindow(Request $request, $unique_code, $routine_id, $window_id)
     {
-        $entity = app(\App\Services\EntityAccessService::class)->resolveEntity($request->tenant, $unique_code);
-        if (!$entity) {
-            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
+        $entity = $this->adventureEntity($request, $unique_code);
+        if ($entity instanceof \Illuminate\Http\JsonResponse) {
+            return $entity;
         }
 
         $routine = $this->routineOf($entity, $routine_id);
@@ -327,9 +304,9 @@ class RoutineController extends Controller
 
     public function destroyWindow(Request $request, $unique_code, $routine_id, $window_id)
     {
-        $entity = app(\App\Services\EntityAccessService::class)->resolveEntity($request->tenant, $unique_code);
-        if (!$entity) {
-            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
+        $entity = $this->adventureEntity($request, $unique_code);
+        if ($entity instanceof \Illuminate\Http\JsonResponse) {
+            return $entity;
         }
 
         $routine = $this->routineOf($entity, $routine_id);

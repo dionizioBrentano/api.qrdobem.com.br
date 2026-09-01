@@ -2,24 +2,16 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Entity;
-use App\Models\CreditBatch;
-use App\Models\Space;
-use App\Policies\SpacePolicy;
 use Illuminate\Http\Request;
 
 class PositionController extends Controller
 {
+    use \App\Http\Controllers\Concerns\ResolvesAdventureEntity;
     public function store(Request $request, $unique_code)
     {
-        $entity = app(\App\Services\EntityAccessService::class)->resolveEntity($request->tenant, $unique_code);
-
-        if (!$entity) {
-            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
-        }
-
-        if ($entity->type !== 'person') {
-            return response()->json(['error' => 'Trilha Aventura suportada apenas para pessoas.'], 400);
+        $entity = $this->adventureEntity($request, $unique_code);
+        if ($entity instanceof \Illuminate\Http\JsonResponse) {
+            return $entity;
         }
 
         $validated = $request->validate([
@@ -47,14 +39,9 @@ class PositionController extends Controller
 
     public function latest(Request $request, $unique_code)
     {
-        $entity = app(\App\Services\EntityAccessService::class)->resolveEntity($request->tenant, $unique_code);
-
-        if (!$entity) {
-            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
-        }
-
-        if ($entity->type !== 'person') {
-            return response()->json(['error' => 'Trilha Aventura suportada apenas para pessoas.'], 400);
+        $entity = $this->adventureEntity($request, $unique_code);
+        if ($entity instanceof \Illuminate\Http\JsonResponse) {
+            return $entity;
         }
 
         $position = $entity->positions()->orderBy('recorded_at', 'desc')->first();

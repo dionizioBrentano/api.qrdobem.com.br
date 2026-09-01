@@ -2,25 +2,17 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Entity;
-use App\Models\CreditBatch;
-use App\Models\Space;
-use App\Policies\SpacePolicy;
 use Illuminate\Http\Request;
 use App\Models\EntityDevice;
 
 class DeviceController extends Controller
 {
+    use \App\Http\Controllers\Concerns\ResolvesAdventureEntity;
     public function index(Request $request, $unique_code)
     {
-        $entity = app(\App\Services\EntityAccessService::class)->resolveEntity($request->tenant, $unique_code);
-
-        if (!$entity) {
-            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
-        }
-
-        if ($entity->type !== 'person') {
-            return response()->json(['error' => 'Trilha Aventura suportada apenas para pessoas.'], 400);
+        $entity = $this->adventureEntity($request, $unique_code);
+        if ($entity instanceof \Illuminate\Http\JsonResponse) {
+            return $entity;
         }
 
         return response()->json($entity->devices);
@@ -28,14 +20,9 @@ class DeviceController extends Controller
 
     public function store(Request $request, $unique_code)
     {
-        $entity = app(\App\Services\EntityAccessService::class)->resolveEntity($request->tenant, $unique_code);
-
-        if (!$entity) {
-            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
-        }
-
-        if ($entity->type !== 'person') {
-            return response()->json(['error' => 'Trilha Aventura suportada apenas para pessoas.'], 400);
+        $entity = $this->adventureEntity($request, $unique_code);
+        if ($entity instanceof \Illuminate\Http\JsonResponse) {
+            return $entity;
         }
 
         $validated = $request->validate([
@@ -61,14 +48,9 @@ class DeviceController extends Controller
 
     public function update(Request $request, $unique_code, $device_id)
     {
-        $entity = app(\App\Services\EntityAccessService::class)->resolveEntity($request->tenant, $unique_code);
-
-        if (!$entity) {
-            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
-        }
-
-        if ($entity->type !== 'person') {
-            return response()->json(['error' => 'Trilha Aventura suportada apenas para pessoas.'], 400);
+        $entity = $this->adventureEntity($request, $unique_code);
+        if ($entity instanceof \Illuminate\Http\JsonResponse) {
+            return $entity;
         }
 
         $device = $entity->devices()->findOrFail($device_id);
@@ -85,14 +67,9 @@ class DeviceController extends Controller
 
     public function destroy(Request $request, $unique_code, $device_id)
     {
-        $entity = app(\App\Services\EntityAccessService::class)->resolveEntity($request->tenant, $unique_code);
-
-        if (!$entity) {
-            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
-        }
-
-        if ($entity->type !== 'person') {
-            return response()->json(['error' => 'Trilha Aventura suportada apenas para pessoas.'], 400);
+        $entity = $this->adventureEntity($request, $unique_code);
+        if ($entity instanceof \Illuminate\Http\JsonResponse) {
+            return $entity;
         }
 
         $device = $entity->devices()->findOrFail($device_id);
@@ -103,14 +80,9 @@ class DeviceController extends Controller
 
     public function issueToken(Request $request, $unique_code, $device_id)
     {
-        $entity = app(\App\Services\EntityAccessService::class)->resolveEntity($request->tenant, $unique_code);
-
-        if (!$entity) {
-            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
-        }
-
-        if ($entity->type !== 'person') {
-            return response()->json(['error' => 'Trilha Aventura suportada apenas para pessoas.'], 400);
+        $entity = $this->adventureEntity($request, $unique_code);
+        if ($entity instanceof \Illuminate\Http\JsonResponse) {
+            return $entity;
         }
 
         $device = $entity->devices()->findOrFail($device_id);
@@ -131,14 +103,9 @@ class DeviceController extends Controller
 
     public function revokeToken(Request $request, $unique_code, $device_id)
     {
-        $entity = app(\App\Services\EntityAccessService::class)->resolveEntity($request->tenant, $unique_code);
-
-        if (!$entity) {
-            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
-        }
-
-        if ($entity->type !== 'person') {
-            return response()->json(['error' => 'Trilha Aventura suportada apenas para pessoas.'], 400);
+        $entity = $this->adventureEntity($request, $unique_code);
+        if ($entity instanceof \Illuminate\Http\JsonResponse) {
+            return $entity;
         }
 
         $device = $entity->devices()->findOrFail($device_id);

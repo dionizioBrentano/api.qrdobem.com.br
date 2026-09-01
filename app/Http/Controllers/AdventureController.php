@@ -11,27 +11,7 @@ use Illuminate\Support\Facades\Hash;
 
 class AdventureController extends Controller
 {
-    private function adventureEntity(Request $request, $unique_code)
-    {
-        $entity = app(\App\Services\EntityAccessService::class)
-            ->resolveEntity($request->tenant, $unique_code);
-
-        if (!$entity) {
-            return response()->json(
-                ['error' => 'Registro não encontrado ou acesso negado.'],
-                404
-            );
-        }
-
-        if ($entity->type !== 'person') {
-            return response()->json(
-                ['error' => 'Trilha Aventura suportada apenas para pessoas.'],
-                400
-            );
-        }
-
-        return $entity;
-    }
+    use \App\Http\Controllers\Concerns\ResolvesAdventureEntity;
 
     public function listReferencePoints(Request $request, $unique_code)
     {
