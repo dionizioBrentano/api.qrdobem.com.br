@@ -9,6 +9,7 @@ use App\Http\Controllers\ApiKeyController;
 use App\Http\Controllers\BeneficiaryController;
 use App\Http\Controllers\ConfirmationController;
 use App\Http\Controllers\CauseController;
+use App\Http\Controllers\CauseProductController;
 use App\Http\Controllers\DisbursementController;
 use App\Http\Controllers\DonationCauseController;
 use App\Http\Controllers\EmergencyController;
@@ -145,6 +146,12 @@ Route::middleware('auth.firebase')->group(function () {
     // Vitrine da causa (Fase 3, T2-R04, T2-R05).
     Route::put('/spaces/{space}/cause', [CauseController::class, 'update']);
     Route::post('/spaces/{space}/cause/publish', [CauseController::class, 'publish']);
+
+    // Produtos da causa (Catálogo)
+    Route::get('/spaces/{space}/products', [CauseProductController::class, 'index']);
+    Route::post('/spaces/{space}/products', [CauseProductController::class, 'store']);
+    Route::put('/spaces/{space}/products/{product}', [CauseProductController::class, 'update']);
+    Route::delete('/spaces/{space}/products/{product}', [CauseProductController::class, 'destroy']);
 
     // Mídia com moderação (Fase 3, T2-R05).
     Route::post('/spaces/{space}/media', [MediaController::class, 'store']);
