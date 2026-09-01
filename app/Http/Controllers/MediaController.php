@@ -48,6 +48,15 @@ class MediaController extends Controller
 
         app(SpacePolicy::class)->authorize($request->tenant, $space, 'entity.edit');
 
+        if ($request->hasFile('file') && !$request->file('file')->isValid()) {
+            if ($request->file('file')->getError() === UPLOAD_ERR_INI_SIZE) {
+                return response()->json([
+                    'error' => 'Arquivo maior do que o servidor aceita.',
+                    'code'  => 'UPLOAD_TOO_LARGE',
+                ], 422);
+            }
+        }
+
         $request->validate([
             'file'    => 'required|file|max:' . (MediaItem::MAX_SIZE_BYTES / 1024),
             'caption' => 'sometimes|nullable|string|max:500',
@@ -66,34 +75,48 @@ class MediaController extends Controller
             ], 422);
         }
 
-        // Nome gerado por nós: nome de arquivo enviado pelo usuário é
-        // vetor de path traversal e de extensão dupla.
-        $extension = $this->extensionFor($mime);
-        $filename  = Str::uuid() . '.' . $extension;
-        $path      = "spaces/{$space->id}/{$filename}";
+        try {
+            if (str_starts_with($mime, 'image/')) {
+                $normalizer = app(\App\Services\ImageNormalizer::class);
+                $file = $normalizer->normalize($file);
+                $mime = 'image/jpeg';
+                $extension = 'jpg';
+            } else {
+                $extension = $this->extensionFor($mime);
+            }
 
-        Storage::disk('private')->putFileAs("spaces/{$space->id}", $file, $filename);
+            $filename  = Str::uuid() . '.' . $extension;
+            $path      = "spaces/{$space->id}/{$filename}";
 
-        $media = MediaItem::create([
-            'owner_type'            => MediaItem::OWNER_SPACE,
-            'owner_id'              => $space->id,
-            'uploaded_by_tenant_id' => $request->tenant->id,
-            'path'                  => $path,
-            'mime_type'             => $mime,
-            'size_bytes'            => $file->getSize(),
-            'caption'               => $request->input('caption'),
-            'status'                => 'pending',
-        ]);
+            Storage::disk('private')->putFileAs("spaces/{$space->id}", $file, $filename);
 
-        return response()->json([
-            'message' => 'Arquivo enviado. Ficará visível depois da revisão.',
-            'media'   => [
-                'id'       => $media->id,
-                'status'   => $media->status,
-                'caption'  => $media->caption,
-                'is_video' => $media->isVideo(),
-            ],
-        ], 201);
+            $media = MediaItem::create([
+                'owner_type'            => MediaItem::OWNER_SPACE,
+                'owner_id'              => $space->id,
+                'uploaded_by_tenant_id' => $request->tenant->id,
+                'path'                  => $path,
+                'mime_type'             => $mime,
+                'size_bytes'            => $file->getSize(),
+                'caption'               => $request->input('caption'),
+                'status'                => 'pending',
+            ]);
+
+            return response()->json([
+                'message' => 'Arquivo enviado. Ficará visível depois da revisão.',
+                'media'   => [
+                    'id'       => $media->id,
+                    'status'   => $media->status,
+                    'caption'  => $media->caption,
+                    'is_video' => $media->isVideo(),
+                ],
+            ], 201);
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Erro ao salvar mídia de space: ' . $e->getMessage());
+            return response()->json([
+                'error' => 'Ocorreu um erro ao processar o arquivo.',
+                'code'  => 'MEDIA_STORE_FAILED',
+            ], 500);
+        }
     }
 
     /** GET /spaces/{space}/media */

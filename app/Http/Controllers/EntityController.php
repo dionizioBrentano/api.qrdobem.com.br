@@ -1267,6 +1267,15 @@ class EntityController extends Controller
             return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
         }
 
+        if ($request->hasFile('file') && !$request->file('file')->isValid()) {
+            if ($request->file('file')->getError() === UPLOAD_ERR_INI_SIZE) {
+                return response()->json([
+                    'error' => 'Arquivo maior do que o servidor aceita.',
+                    'code'  => 'UPLOAD_TOO_LARGE',
+                ], 422);
+            }
+        }
+
         $request->validate([
             'file'    => 'required|file|max:' . (\App\Models\MediaItem::MAX_SIZE_BYTES / 1024),
             'caption' => 'sometimes|nullable|string|max:500',
@@ -1282,43 +1291,54 @@ class EntityController extends Controller
                 'received' => $mime,
             ], 422);
         }
+        try {
+            if (str_starts_with($mime, 'image/')) {
+                $normalizer = app(\App\Services\ImageNormalizer::class);
+                $file = $normalizer->normalize($file);
+                $mime = 'image/jpeg';
+                $extension = 'jpg';
+            } else {
+                $extension = match ($mime) {
+                    'video/mp4'       => 'mp4',
+                    'video/quicktime' => 'mov',
+                    default           => 'bin',
+                };
+            }
 
-        $extension = match ($mime) {
-            'image/jpeg', 'image/jpg' => 'jpg',
-            'image/png'               => 'png',
-            'image/webp'              => 'webp',
-            'video/mp4'               => 'mp4',
-            'video/quicktime'         => 'mov',
-            default                   => 'bin',
-        };
+            $filename  = \Illuminate\Support\Str::uuid() . '.' . $extension;
+            $path      = "entities/{$entity->id}/{$filename}";
 
-        $filename  = \Illuminate\Support\Str::uuid() . '.' . $extension;
-        $path      = "entities/{$entity->id}/{$filename}";
+            \Illuminate\Support\Facades\Storage::disk('private')->putFileAs("entities/{$entity->id}", $file, $filename);
 
-        \Illuminate\Support\Facades\Storage::disk('private')->putFileAs("entities/{$entity->id}", $file, $filename);
+            $media = \App\Models\MediaItem::create([
+                'owner_type'            => \App\Models\MediaItem::OWNER_ENTITY,
+                'owner_id'              => $entity->id,
+                'uploaded_by_tenant_id' => $tenant->id,
+                'path'                  => $path,
+                'mime_type'             => $mime,
+                'size_bytes'            => $file->getSize(),
+                'caption'               => $request->input('caption'),
+                'status'                => 'approved',
+            ]);
 
-        $media = \App\Models\MediaItem::create([
-            'owner_type'            => \App\Models\MediaItem::OWNER_ENTITY,
-            'owner_id'              => $entity->id,
-            'uploaded_by_tenant_id' => $tenant->id,
-            'path'                  => $path,
-            'mime_type'             => $mime,
-            'size_bytes'            => $file->getSize(),
-            'caption'               => $request->input('caption'),
-            'status'                => 'approved',
-        ]);
+            \Illuminate\Support\Facades\Log::info("Mídia {$media->id} enviada para entidade {$entity->unique_code} pelo tenant {$tenant->id}");
 
-        \Illuminate\Support\Facades\Log::info("Mídia {$media->id} enviada para entidade {$entity->unique_code} pelo tenant {$tenant->id}");
-
-        return response()->json([
-            'message' => 'Arquivo enviado e disponível.',
-            'media'   => [
-                'id'       => $media->id,
-                'status'   => $media->status,
-                'caption'  => $media->caption,
-                'is_video' => $media->isVideo(),
-            ],
-        ], 201);
+            return response()->json([
+                'message' => 'Arquivo enviado e disponível.',
+                'media'   => [
+                    'id'       => $media->id,
+                    'status'   => $media->status,
+                    'caption'  => $media->caption,
+                    'is_video' => $media->isVideo(),
+                ],
+            ], 201);
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Erro ao salvar mídia de entidade: ' . $e->getMessage());
+            return response()->json([
+                'error' => 'Ocorreu um erro ao processar o arquivo.',
+                'code'  => 'MEDIA_STORE_FAILED',
+            ], 500);
+        }
     }
 
     /** GET /entities/{unique_code}/media */

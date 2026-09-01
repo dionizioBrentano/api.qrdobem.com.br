@@ -338,6 +338,15 @@ class DisbursementController extends Controller
             ], 422);
         }
 
+        if ($request->hasFile('file') && !$request->file('file')->isValid()) {
+            if ($request->file('file')->getError() === UPLOAD_ERR_INI_SIZE) {
+                return response()->json([
+                    'error' => 'Arquivo maior do que o servidor aceita.',
+                    'code'  => 'UPLOAD_TOO_LARGE',
+                ], 422);
+            }
+        }
+
         $request->validate([
             'file'    => 'required|file|max:' . (MediaItem::MAX_SIZE_BYTES / 1024),
             'caption' => 'sometimes|nullable|string|max:500',
@@ -353,29 +362,43 @@ class DisbursementController extends Controller
             ], 422);
         }
 
-        $extension = match ($mime) {
-            'image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp',
-            'video/mp4' => 'mp4', 'video/quicktime' => 'mov', default => 'bin',
-        };
+        try {
+            if (str_starts_with($mime, 'image/')) {
+                $normalizer = app(\App\Services\ImageNormalizer::class);
+                $file = $normalizer->normalize($file);
+                $mime = 'image/jpeg';
+                $extension = 'jpg';
+            } else {
+                $extension = match ($mime) {
+                    'video/mp4' => 'mp4', 'video/quicktime' => 'mov', default => 'bin',
+                };
+            }
 
-        $filename = Str::uuid() . '.' . $extension;
-        $directory = "disbursements/{$disbursement->id}";
+            $filename = Str::uuid() . '.' . $extension;
+            $directory = "disbursements/{$disbursement->id}";
 
-        Storage::disk('private')->putFileAs($directory, $file, $filename);
+            Storage::disk('private')->putFileAs($directory, $file, $filename);
 
-        MediaItem::create([
-            'owner_type'  => MediaItem::OWNER_DISBURSEMENT,
-            'owner_id'    => $disbursement->id,
-            'path'        => "{$directory}/{$filename}",
-            'mime_type'   => $mime,
-            'size_bytes'  => $file->getSize(),
-            'caption'     => $request->input('caption'),
-            'status'      => 'pending',
-        ]);
+            MediaItem::create([
+                'owner_type'  => MediaItem::OWNER_DISBURSEMENT,
+                'owner_id'    => $disbursement->id,
+                'path'        => "{$directory}/{$filename}",
+                'mime_type'   => $mime,
+                'size_bytes'  => $file->getSize(),
+                'caption'     => $request->input('caption'),
+                'status'      => 'pending',
+            ]);
 
-        return response()->json([
-            'message' => 'Obrigado! A imagem passará por revisão antes de aparecer para os doadores.',
-        ], 201);
+            return response()->json([
+                'message' => 'Obrigado! A imagem passará por revisão antes de aparecer para os doadores.',
+            ], 201);
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Erro ao salvar prova de disbursement: ' . $e->getMessage());
+            return response()->json([
+                'error' => 'Ocorreu um erro ao processar o arquivo.',
+                'code'  => 'MEDIA_STORE_FAILED',
+            ], 500);
+        }
     }
 
     /**
