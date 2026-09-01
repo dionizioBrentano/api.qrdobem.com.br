@@ -16,7 +16,8 @@ use Illuminate\Support\Facades\RateLimiter;
 class EmergencyController extends Controller
 {
     public function __construct(
-        private QrCodeService $qrCode
+        private QrCodeService $qrCode,
+        private \App\Services\OwnerMailNotifier $notifier
     ) {
     }
 
@@ -66,7 +67,7 @@ class EmergencyController extends Controller
             'user_agent' => $request->userAgent(),
         ]);
 
-        $this->notifyOwner($entity);
+        $this->notifier->notifyEmergencyDeclared($entity);
 
         return response()->json([
             'message' => 'Emergência declarada. O responsável foi notificado.',
@@ -112,26 +113,5 @@ class EmergencyController extends Controller
             'declared_at' => $declaration->declared_at,
             'declarant_cpf' => $declaration->declarant_cpf_encrypted,
         ]);
-    }
-
-    private function notifyOwner(Entity $entity): void
-    {
-        $owner = $entity->organization?->owner;
-
-        if (!$owner || empty($owner->email)) {
-            return;
-        }
-
-        try {
-            Mail::to($owner->email)->send(
-                new EmergencyDeclaredMail($entity->encrypted_name, $this->qrCode->urlFor($entity->unique_code))
-            );
-        } catch (\Exception $e) {
-            // A declaração já foi registrada; falha de SMTP não pode desfazê-la.
-            Log::error('Falha ao notificar emergência declarada', [
-                'entity_id' => $entity->id,
-                'error' => $e->getMessage(),
-            ]);
-        }
     }
 }

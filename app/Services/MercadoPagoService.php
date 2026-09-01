@@ -476,7 +476,7 @@ class MercadoPagoService
      *
      * Devolve bool em vez de array: o chamador não tem o que fazer com o
      * corpo da resposta, e um cancelamento que falha no MP não pode impedir
-     * o cancelamento local — ver DonationController::cancelSubscription().
+     * o cancelamento local — ver DonationCauseController::cancelSubscription().
      */
     public function cancelPreapproval(\App\Models\DonationSubscription $subscription): bool
     {

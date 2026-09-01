@@ -15,7 +15,7 @@ use Illuminate\Support\Facades\Mail;
 
 class ConversationController extends Controller
 {
-    public function __construct(private PiiDetector $pii)
+    public function __construct(private PiiDetector $pii, private \App\Services\OwnerMailNotifier $notifier)
     {
     }
 
@@ -80,7 +80,7 @@ class ConversationController extends Controller
             ]);
         }
 
-        $this->notifyOwner($entity);
+        $this->notifier->notifyNewConversationMessage($entity);
 
         return response()->json($this->present($conversation->fresh()), 201);
     }
@@ -119,7 +119,7 @@ class ConversationController extends Controller
             'message' => $request->input('message'),
         ]);
 
-        $this->notifyOwner($entity);
+        $this->notifier->notifyNewConversationMessage($entity);
 
         return response()->json($this->present($conversation->fresh()), 201);
     }
@@ -285,32 +285,6 @@ class ConversationController extends Controller
         return null;
     }
 
-    private function notifyOwner(Entity $entity): void
-    {
-        $owner = $entity->organization?->owner;
-
-        if (!$owner || empty($owner->email)) {
-            return;
-        }
-
-        $link = config('qrdobem.frontend_url') . '/messages';
-
-        try {
-            Mail::to($owner->email)->send(
-                new NewConversationMessageMail($entity->encrypted_name, $link)
-            );
-        } catch (\Exception $e) {
-            // A mensagem já foi persistida; falha de SMTP não pode derrubar o envio.
-            Log::error('Falha ao notificar tutor de nova mensagem', [
-                'entity_id' => $entity->id,
-                'error' => $e->getMessage(),
-            ]);
-        }
-    }
-
-    /**
-     * Formato único de resposta de conversa, usado por todos os endpoints.
-     */
     private function present(EntityConversation $conversation): array
     {
         $messages = $conversation->messages()->orderBy('id')->get();
