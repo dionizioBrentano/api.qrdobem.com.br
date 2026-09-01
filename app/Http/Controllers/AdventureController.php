@@ -2,25 +2,42 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Entity;
-use App\Models\CreditBatch;
+use App\Models\AdventureEvent;
 use App\Models\Space;
-use App\Policies\SpacePolicy;
+use App\Models\PanicEvent;
+use App\Http\Controllers\PanicController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 
 class AdventureController extends Controller
 {
-    public function listReferencePoints(Request $request, $unique_code)
+    private function adventureEntity(Request $request, $unique_code)
     {
-        $entity = app(\App\Services\EntityAccessService::class)->resolveEntity($request->tenant, $unique_code);
+        $entity = app(\App\Services\EntityAccessService::class)
+            ->resolveEntity($request->tenant, $unique_code);
 
         if (!$entity) {
-            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
+            return response()->json(
+                ['error' => 'Registro não encontrado ou acesso negado.'],
+                404
+            );
         }
 
         if ($entity->type !== 'person') {
-            return response()->json(['error' => 'Trilha Aventura suportada apenas para pessoas.'], 400);
+            return response()->json(
+                ['error' => 'Trilha Aventura suportada apenas para pessoas.'],
+                400
+            );
+        }
+
+        return $entity;
+    }
+
+    public function listReferencePoints(Request $request, $unique_code)
+    {
+        $entity = $this->adventureEntity($request, $unique_code);
+        if ($entity instanceof \Illuminate\Http\JsonResponse) {
+            return $entity;
         }
 
         return response()->json($entity->referencePoints);
@@ -28,14 +45,9 @@ class AdventureController extends Controller
 
     public function storeReferencePoint(Request $request, $unique_code)
     {
-        $entity = app(\App\Services\EntityAccessService::class)->resolveEntity($request->tenant, $unique_code);
-
-        if (!$entity) {
-            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
-        }
-
-        if ($entity->type !== 'person') {
-            return response()->json(['error' => 'Trilha Aventura suportada apenas para pessoas.'], 400);
+        $entity = $this->adventureEntity($request, $unique_code);
+        if ($entity instanceof \Illuminate\Http\JsonResponse) {
+            return $entity;
         }
 
         $validated = $request->validate([
@@ -59,10 +71,9 @@ class AdventureController extends Controller
 
     public function destroyReferencePoint(Request $request, $unique_code, $point_id)
     {
-        $entity = app(\App\Services\EntityAccessService::class)->resolveEntity($request->tenant, $unique_code);
-
-        if (!$entity) {
-            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
+        $entity = $this->adventureEntity($request, $unique_code);
+        if ($entity instanceof \Illuminate\Http\JsonResponse) {
+            return $entity;
         }
 
         $point = $entity->referencePoints()->where('id', $point_id)->firstOrFail();
@@ -73,14 +84,9 @@ class AdventureController extends Controller
 
     public function setSilentPassword(Request $request, $unique_code)
     {
-        $entity = app(\App\Services\EntityAccessService::class)->resolveEntity($request->tenant, $unique_code);
-
-        if (!$entity) {
-            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
-        }
-
-        if ($entity->type !== 'person') {
-            return response()->json(['error' => 'Trilha Aventura suportada apenas para pessoas.'], 400);
+        $entity = $this->adventureEntity($request, $unique_code);
+        if ($entity instanceof \Illuminate\Http\JsonResponse) {
+            return $entity;
         }
 
         $request->validate([
@@ -95,14 +101,9 @@ class AdventureController extends Controller
 
     public function createChallenge(Request $request, $unique_code)
     {
-        $entity = app(\App\Services\EntityAccessService::class)->resolveEntity($request->tenant, $unique_code);
-
-        if (!$entity) {
-            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
-        }
-
-        if ($entity->type !== 'person') {
-            return response()->json(['error' => 'Trilha Aventura suportada apenas para pessoas.'], 400);
+        $entity = $this->adventureEntity($request, $unique_code);
+        if ($entity instanceof \Illuminate\Http\JsonResponse) {
+            return $entity;
         }
 
         $validated = $request->validate([
@@ -111,7 +112,7 @@ class AdventureController extends Controller
             'detected_at' => 'nullable|date',
         ]);
 
-        $challenge = \App\Models\AdventureEvent::create([
+        $challenge = AdventureEvent::create([
             'entity_id' => $entity->id,
             'type' => 'pending_challenge',
             'status' => 'pending',
@@ -126,18 +127,9 @@ class AdventureController extends Controller
 
     public function silentTrigger(Request $request, $unique_code)
     {
-        $entity = app(\App\Services\EntityAccessService::class)->resolveEntity($request->tenant, $unique_code);
-
-        if (!$entity) {
-            // Se falhar autorização, em teoria o padrão da API já é 404.
-            // Para manter o silent total mesmo sem auth, precisaria ver se é a ideia,
-            // mas o prompt diz "Só o dono autenticado da Entity (via canAccessEntity) pode chamar esses endpoints".
-            // Então retornar 404 aqui é esperado e alinhado com o resolveEntity padrão.
-            return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
-        }
-
-        if ($entity->type !== 'person') {
-            return response()->json(['error' => 'Trilha Aventura suportada apenas para pessoas.'], 400);
+        $entity = $this->adventureEntity($request, $unique_code);
+        if ($entity instanceof \Illuminate\Http\JsonResponse) {
+            return $entity;
         }
 
         $request->validate([
@@ -145,12 +137,12 @@ class AdventureController extends Controller
             'password' => 'required|string',
         ]);
 
-        $challenge = \App\Models\AdventureEvent::where('id', $request->challenge_id)
+        $challenge = AdventureEvent::where('id', $request->challenge_id)
             ->where('entity_id', $entity->id)
             ->where('status', 'pending')
             ->first();
 
-        // Sempre a mesma resposta genérica, independente de falhas a partir daqui
+        // Sempre a mesma resposta genérica, independente de falhas a partir daqui (não vazar senha)
         $genericResponse = response()->json([
             'message' => 'Verificação registrada.'
         ], 200);
@@ -170,9 +162,9 @@ class AdventureController extends Controller
         ]);
 
         // Dispara pânico silencioso
-        $space = $entity->space_id ? \App\Models\Space::find($entity->space_id) : null;
+        $space = $entity->space_id ? Space::find($entity->space_id) : null;
         
-        $panicController = app(\App\Http\Controllers\PanicController::class);
+        $panicController = app(PanicController::class);
         $panicEvent = $panicController->createEvent(
             $space,
             [
@@ -181,7 +173,7 @@ class AdventureController extends Controller
                 'longitude' => $challenge->metadata['longitude'] ?? null,
                 'note' => 'Alerta Silencioso (Trilha Aventura)',
             ],
-            \App\Models\PanicEvent::SOURCE_APP,
+            PanicEvent::SOURCE_APP,
             $request->tenant
         );
 
@@ -192,4 +184,5 @@ class AdventureController extends Controller
         return $genericResponse;
     }
 }
+
 
