@@ -152,6 +152,7 @@ Route::middleware('auth.firebase')->group(function () {
     Route::post('/spaces/{space}/products', [CauseProductController::class, 'store']);
     Route::put('/spaces/{space}/products/{product}', [CauseProductController::class, 'update']);
     Route::delete('/spaces/{space}/products/{product}', [CauseProductController::class, 'destroy']);
+    Route::get('/spaces/{space}/products/{product}/quote', [CauseProductController::class, 'quote']);
 
     // Mídia com moderação (Fase 3, T2-R05).
     Route::post('/spaces/{space}/media', [MediaController::class, 'store']);

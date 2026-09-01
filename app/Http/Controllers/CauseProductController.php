@@ -217,4 +217,33 @@ class CauseProductController extends Controller
             $product->substitutes()->createMany($inserts);
         }
     }
+
+    /**
+     * GET /spaces/{space}/products/{product}/quote?qty=
+     */
+    public function quote(Request $request, $spaceId, $productId, \App\Services\CauseProductPricing $pricing)
+    {
+        $space = Space::find($spaceId);
+
+        if (!$space || $space->type !== Space::TYPE_CAUSE) {
+            return response()->json(['error' => 'Espaço de causa não encontrado.'], 404);
+        }
+
+        // Mesmo nível de permissão usado no index/store/update do catálogo
+        app(SpacePolicy::class)->authorize($request->tenant, $space, 'space.edit');
+
+        $product = CauseProduct::where('space_id', $space->id)->find($productId);
+
+        if (!$product) {
+            return response()->json(['error' => 'Produto não encontrado.'], 404);
+        }
+
+        $qty = $request->input('qty', 1);
+
+        $quote = $pricing->quote($product, $qty);
+
+        return response()->json([
+            'quote' => $quote
+        ]);
+    }
 }
