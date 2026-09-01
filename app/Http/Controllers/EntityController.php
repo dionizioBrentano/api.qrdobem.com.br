@@ -388,7 +388,7 @@ class EntityController extends Controller
             ->where('unique_code', $unique_code)
             ->first();
 
-        if (!$entity || !$this->canAccessEntity($tenant, $entity)) {
+        if (!$entity || !app(\App\Services\EntityAccessService::class)->canAccessEntity($tenant, $entity)) {
             return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
         }
 
@@ -428,7 +428,7 @@ class EntityController extends Controller
 
         $entity = Entity::where('unique_code', $unique_code)->first();
 
-        if (!$entity || !$this->canAccessEntity($tenant, $entity)) {
+        if (!$entity || !app(\App\Services\EntityAccessService::class)->canAccessEntity($tenant, $entity)) {
             return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
         }
 
@@ -592,7 +592,7 @@ class EntityController extends Controller
 
         $entity = Entity::where('unique_code', $unique_code)->first();
 
-        if (!$entity || !$this->canAccessEntity($tenant, $entity)) {
+        if (!$entity || !app(\App\Services\EntityAccessService::class)->canAccessEntity($tenant, $entity)) {
             return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
         }
 
@@ -636,7 +636,7 @@ class EntityController extends Controller
             return response()->json(['error' => 'Registro não encontrado.'], 404);
         }
 
-        if (!$this->canAccessEntity($tenant, $entity)) {
+        if (!app(\App\Services\EntityAccessService::class)->canAccessEntity($tenant, $entity)) {
             return response()->json(['error' => 'Acesso negado.'], 403);
         }
 
@@ -687,7 +687,7 @@ class EntityController extends Controller
             return response()->json(['error' => 'Registro não encontrado.'], 404);
         }
 
-        if (!$this->canAccessEntity($tenant, $entity)) {
+        if (!app(\App\Services\EntityAccessService::class)->canAccessEntity($tenant, $entity)) {
             return response()->json(['error' => 'Acesso negado.'], 403);
         }
 
@@ -720,7 +720,7 @@ class EntityController extends Controller
 
         $entity = Entity::where('unique_code', $unique_code)->first();
 
-        if (!$entity || !$this->canAccessEntity($tenant, $entity)) {
+        if (!$entity || !app(\App\Services\EntityAccessService::class)->canAccessEntity($tenant, $entity)) {
             return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
         }
 
@@ -757,7 +757,7 @@ class EntityController extends Controller
 
         $entity = Entity::where('unique_code', $unique_code)->first();
 
-        if (!$entity || !$this->canAccessEntity($tenant, $entity)) {
+        if (!$entity || !app(\App\Services\EntityAccessService::class)->canAccessEntity($tenant, $entity)) {
             return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
         }
 
@@ -784,7 +784,7 @@ class EntityController extends Controller
 
         $entity = Entity::where('unique_code', $unique_code)->first();
 
-        if (!$entity || !$this->canAccessEntity($tenant, $entity)) {
+        if (!$entity || !app(\App\Services\EntityAccessService::class)->canAccessEntity($tenant, $entity)) {
             return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
         }
 
@@ -1049,41 +1049,6 @@ class EntityController extends Controller
     }
 
     /**
-     * Acesso à entidade: pela organização (regra atual) OU pelo espaço
-     * (regra nova). Basta um dos dois — é o que mantém em pé tanto a
-     * entidade já migrada quanto a que o backfill ainda não tocou.
-     */
-    private function canAccessEntity($tenant, Entity $entity): bool
-    {
-        $orgIds = $tenant->organizations()->pluck('organizations.id')->all();
-
-        if ($entity->organization_id && in_array($entity->organization_id, $orgIds)) {
-            return true;
-        }
-
-        if (!$entity->organization_id && $entity->credit_batch_id) {
-            $batch = CreditBatch::find($entity->credit_batch_id);
-            if ($batch && $batch->recipient_tenant_id === $tenant->id) {
-                return true;
-            }
-        }
-
-        if (!$entity->space_id) {
-            return false;
-        }
-
-        try {
-            $space = Space::find($entity->space_id);
-
-            return $space
-                ? app(SpacePolicy::class)->check($tenant, $space, 'entity.view')
-                : false;
-        } catch (\Throwable $e) {
-            return false;
-        }
-    }
-
-    /**
      * Dados do pet para o dono, sem filtro de visibilidade, com o histórico
      * de vacinas junto.
      */
@@ -1263,7 +1228,7 @@ class EntityController extends Controller
         $tenant = $request->tenant;
         $entity = Entity::where('unique_code', $unique_code)->first();
 
-        if (!$entity || !$this->canAccessEntity($tenant, $entity)) {
+        if (!$entity || !app(\App\Services\EntityAccessService::class)->canAccessEntity($tenant, $entity)) {
             return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
         }
 
@@ -1347,7 +1312,7 @@ class EntityController extends Controller
         $tenant = $request->tenant;
         $entity = Entity::where('unique_code', $unique_code)->first();
 
-        if (!$entity || !$this->canAccessEntity($tenant, $entity)) {
+        if (!$entity || !app(\App\Services\EntityAccessService::class)->canAccessEntity($tenant, $entity)) {
             return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
         }
 
@@ -1377,7 +1342,7 @@ class EntityController extends Controller
         $tenant = $request->tenant;
         $entity = Entity::where('unique_code', $unique_code)->first();
 
-        if (!$entity || !$this->canAccessEntity($tenant, $entity)) {
+        if (!$entity || !app(\App\Services\EntityAccessService::class)->canAccessEntity($tenant, $entity)) {
             return response()->json(['error' => 'Registro não encontrado ou acesso negado.'], 404);
         }
 
@@ -1400,3 +1365,4 @@ class EntityController extends Controller
         return response()->json(['message' => 'Mídia removida.']);
     }
 }
+
