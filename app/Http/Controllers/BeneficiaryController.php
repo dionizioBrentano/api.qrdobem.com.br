@@ -215,7 +215,10 @@ class BeneficiaryController extends Controller
      */
     public function publicShow(Request $request, $uniqueCode)
     {
-        $beneficiary = Beneficiary::with(['needs', 'disbursements'])
+        $beneficiary = Beneficiary::with([
+                'needs.product.substitutes.substitute',
+                'disbursements'
+            ])
             ->where('unique_code', $uniqueCode)
             ->where('status', 'active')
             ->first();
@@ -223,6 +226,8 @@ class BeneficiaryController extends Controller
         if (!$beneficiary) {
             return response()->json(['error' => 'Página não encontrada.'], 404);
         }
+        
+        $pricing = app(\App\Services\CauseProductPricing::class);
 
         return response()->json([
             'beneficiary' => [
@@ -233,14 +238,55 @@ class BeneficiaryController extends Controller
             ],
             'needs' => $beneficiary->needs
                 ->whereIn('status', ['open', 'in_progress'])
-                ->map(fn (BeneficiaryNeed $n) => [
-                    'id'          => $n->id,
-                    'title'       => $n->title,
-                    'description' => $n->description,
-                    'kind'        => $n->kind,
-                    'status'      => $n->status,
-                    'priority'    => $n->priority,
-                ])->values(),
+                ->map(function (BeneficiaryNeed $n) use ($pricing) {
+                    $prodData = null;
+                    if ($n->product) {
+                        $prodQuote = $n->quantity !== null ? $pricing->quote($n->product, $n->quantity) : null;
+                        
+                        $subs = [];
+                        if ($n->accepts_substitute) {
+                            $subs = $n->product->substitutes->map(function($sub) use ($n, $pricing) {
+                                $subQuote = null;
+                                // "Similar só com quote se qty_equivalent estiver preenchido."
+                                if ($sub->qty_equivalent !== null && $n->quantity !== null) {
+                                    $subQuote = $pricing->quote($sub->substitute, (float) $n->quantity * (float) $sub->qty_equivalent);
+                                }
+                                
+                                return [
+                                    'id'     => $sub->substitute->id,
+                                    'name'   => $sub->substitute->name,
+                                    'unit'   => $sub->substitute->unit,
+                                    'purpose'=> $sub->substitute->purpose,
+                                    'quote'  => $subQuote
+                                ];
+                            })->values();
+                        }
+
+                        $prodData = [
+                            'id'          => $n->product->id,
+                            'name'        => $n->product->name,
+                            'unit'        => $n->product->unit,
+                            'purpose'     => $n->product->purpose,
+                            'quote'       => $prodQuote,
+                            'substitutes' => $subs,
+                        ];
+                    }
+
+                    return [
+                        'id'          => $n->id,
+                        'title'       => $n->title,
+                        'description' => $n->description,
+                        'kind'        => $n->kind,
+                        'status'      => $n->status,
+                        'priority'    => $n->priority,
+                        'quantity'    => $n->quantity,
+                        'period'      => [
+                            'starts_on' => $n->period_starts_on ? $n->period_starts_on->format('Y-m-d') : null,
+                            'ends_on'   => $n->period_ends_on ? $n->period_ends_on->format('Y-m-d') : null,
+                        ],
+                        'product'     => $prodData,
+                    ];
+                })->values(),
             // Repasses a caminho: é aqui que ele vê o que precisa confirmar.
             'pending_confirmation' => $beneficiary->disbursements
                 ->where('status', 'sent')
@@ -273,12 +319,31 @@ class BeneficiaryController extends Controller
         }
 
         $validated = $request->validate([
-            'title'            => 'required|string|max:255',
-            'description'      => 'sometimes|nullable|string|max:2000',
-            'kind'             => 'sometimes|string|in:' . implode(',', BeneficiaryNeed::KINDS),
-            'estimated_amount' => 'sometimes|nullable|numeric|min:0',
-            'priority'         => 'sometimes|integer|min:1|max:5',
+            'title'              => 'sometimes|string|max:255',
+            'description'        => 'sometimes|nullable|string|max:2000',
+            'kind'               => 'sometimes|string|in:' . implode(',', BeneficiaryNeed::KINDS),
+            'estimated_amount'   => 'sometimes|nullable|numeric|min:0',
+            'priority'           => 'sometimes|integer|min:1|max:5',
+            'cause_product_id'   => 'sometimes|nullable|integer',
+            'quantity'           => 'sometimes|nullable|numeric|min:0',
+            'accepts_substitute' => 'sometimes|boolean',
+            'period_starts_on'   => 'sometimes|nullable|date',
+            'period_ends_on'     => 'sometimes|nullable|date|after_or_equal:period_starts_on',
         ]);
+
+        if (!empty($validated['cause_product_id'])) {
+            $product = \App\Models\CauseProduct::find($validated['cause_product_id']);
+            if (!$product || $product->space_id !== $beneficiary->space_id) {
+                return response()->json(['error' => 'Produto inválido ou não pertence a esta causa.'], 422);
+            }
+            if (empty($validated['title'])) {
+                $validated['title'] = $product->name;
+            }
+        }
+
+        if (empty($validated['title'])) {
+            return response()->json(['error' => 'O título é obrigatório.'], 422);
+        }
 
         // Teto de pedidos em aberto: sem isso, um código vazado viraria
         // enxurrada de solicitações e a gestão da causa perderia o fio.
@@ -294,13 +359,18 @@ class BeneficiaryController extends Controller
         }
 
         $need = BeneficiaryNeed::create([
-            'beneficiary_id'   => $beneficiary->id,
-            'title'            => $validated['title'],
-            'description'      => $validated['description'] ?? null,
-            'kind'             => $validated['kind'] ?? BeneficiaryNeed::KIND_PRODUCT,
-            'estimated_amount' => $validated['estimated_amount'] ?? null,
-            'priority'         => $validated['priority'] ?? 3,
-            'status'           => 'open',
+            'beneficiary_id'     => $beneficiary->id,
+            'cause_product_id'   => $validated['cause_product_id'] ?? null,
+            'title'              => $validated['title'],
+            'description'        => $validated['description'] ?? null,
+            'kind'               => $validated['kind'] ?? BeneficiaryNeed::KIND_PRODUCT,
+            'estimated_amount'   => $validated['estimated_amount'] ?? null,
+            'quantity'           => $validated['quantity'] ?? null,
+            'accepts_substitute' => $validated['accepts_substitute'] ?? true,
+            'period_starts_on'   => $validated['period_starts_on'] ?? null,
+            'period_ends_on'     => $validated['period_ends_on'] ?? null,
+            'priority'           => $validated['priority'] ?? 3,
+            'status'             => 'open',
         ]);
 
         return response()->json([

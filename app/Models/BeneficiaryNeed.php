@@ -26,18 +26,32 @@ class BeneficiaryNeed extends Model
 
     protected $fillable = [
         'beneficiary_id',
+        'cause_product_id',
         'title',
         'description',
         'kind',
         'estimated_amount',
+        'quantity',
+        'accepts_substitute',
+        'period_starts_on',
+        'period_ends_on',
         'status',
         'priority',
     ];
 
     protected $casts = [
-        'estimated_amount' => 'decimal:2',
-        'priority'         => 'integer',
+        'estimated_amount'   => 'decimal:2',
+        'quantity'           => 'decimal:2',
+        'accepts_substitute' => 'boolean',
+        'period_starts_on'   => 'date',
+        'period_ends_on'     => 'date',
+        'priority'           => 'integer',
     ];
+
+    public function product(): BelongsTo
+    {
+        return $this->belongsTo(CauseProduct::class, 'cause_product_id');
+    }
 
     public function beneficiary(): BelongsTo
     {
