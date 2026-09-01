@@ -95,4 +95,22 @@ return [
 
     'read_dedup_minutes' => (int) env('QR_READ_DEDUP_MINUTES', 15),
 
+    'composite' => [
+        'background' => env('QR_COMPOSITE_BG', '#ffffff'),
+        'caption_color' => env('QR_COMPOSITE_CAPTION', '#000000'),
+        'brand_color' => env('QR_COMPOSITE_BRAND', '#444444'),
+        'brand_label' => env('QR_COMPOSITE_BRAND_LABEL', 'QR do Bem'),
+        'caption_offset_y' => 35,
+        'qr_offset_y' => 50,
+        'extra_height' => 100,
+        'footer_inset' => 15,
+    ],
+
+    'print_batch' => [
+        'meta_color' => env('QR_BATCH_META_COLOR', '#555'),
+        'cut_color' => env('QR_BATCH_CUT_COLOR', '#bbb'),
+        'code_color' => env('QR_BATCH_CODE_COLOR', '#333'),
+        'num_color' => env('QR_BATCH_NUM_COLOR', '#999'),
+    ],
+
 ];

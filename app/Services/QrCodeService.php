@@ -114,21 +114,29 @@ class QrCodeService
         $qrSize = $size ?? (int) config('qrdobem.size', 512);
         
         $width = $qrSize;
-        $height = $qrSize + 100; // 50px topo (legenda), 50px rodapé (QR do Bem)
+        $height = $qrSize + (int) config('qrdobem.composite.extra_height');
         
         $escapedCaption = htmlspecialchars($caption, ENT_XML1, 'UTF-8');
         
         // Remove a declaração XML do SVG interno
         $cleanQrSvg = preg_replace('/<\?xml[^>]*\?>/', '', $qrSvg);
 
+        $bg = config('qrdobem.composite.background');
+        $captionY = (int) config('qrdobem.composite.caption_offset_y');
+        $captionColor = config('qrdobem.composite.caption_color');
+        $qrY = (int) config('qrdobem.composite.qr_offset_y');
+        $footerY = $height - (int) config('qrdobem.composite.footer_inset');
+        $brandColor = config('qrdobem.composite.brand_color');
+        $brandLabel = htmlspecialchars(config('qrdobem.composite.brand_label'), ENT_XML1, 'UTF-8');
+
         return '<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="' . $width . '" height="' . $height . '" viewBox="0 0 ' . $width . ' ' . $height . '">
-    <rect width="100%" height="100%" fill="#ffffff" />
-    <text x="50%" y="35" font-family="sans-serif" font-size="' . max(14, round($qrSize * 0.04)) . '" font-weight="bold" fill="#000000" text-anchor="middle">' . $escapedCaption . '</text>
-    <svg x="0" y="50" width="' . $qrSize . '" height="' . $qrSize . '">
+    <rect width="100%" height="100%" fill="' . $bg . '" />
+    <text x="50%" y="' . $captionY . '" font-family="sans-serif" font-size="' . max(14, round($qrSize * 0.04)) . '" font-weight="bold" fill="' . $captionColor . '" text-anchor="middle">' . $escapedCaption . '</text>
+    <svg x="0" y="' . $qrY . '" width="' . $qrSize . '" height="' . $qrSize . '">
         ' . trim($cleanQrSvg) . '
     </svg>
-    <text x="50%" y="' . ($height - 15) . '" font-family="sans-serif" font-size="' . max(12, round($qrSize * 0.03)) . '" font-weight="bold" fill="#444444" text-anchor="middle">QR do Bem</text>
+    <text x="50%" y="' . $footerY . '" font-family="sans-serif" font-size="' . max(12, round($qrSize * 0.03)) . '" font-weight="bold" fill="' . $brandColor . '" text-anchor="middle">' . $brandLabel . '</text>
 </svg>';
     }
 

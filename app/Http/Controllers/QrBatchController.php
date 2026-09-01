@@ -258,54 +258,12 @@ class QrBatchController extends Controller
         $spaceName = e($space->name);
         $generated = $batch->generated_at?->format('d/m/Y H:i') ?? '';
 
-        $html = <<<HTML
-        <!doctype html>
-        <html lang="pt-BR">
-        <head>
-        <meta charset="utf-8">
-        <title>QR do Bem — {$title}</title>
-        <style>
-            /* Margem de 10mm: abaixo disso a maioria das impressoras
-               domésticas corta o conteúdo da borda. */
-            @page { size: A4; margin: 10mm; }
-            * { box-sizing: border-box; }
-            body { font-family: Arial, Helvetica, sans-serif; margin: 0; }
-            header { margin-bottom: 6mm; }
-            h1 { font-size: 14pt; margin: 0 0 2mm; }
-            .meta { font-size: 9pt; color: #555; }
-            .sheet {
-                display: grid;
-                grid-template-columns: repeat(3, 1fr);
-                gap: 4mm;
-            }
-            .card {
-                border: 1px dashed #bbb;   /* guia de corte */
-                padding: 3mm;
-                text-align: center;
-                /* Impede que uma etiqueta seja partida entre duas folhas. */
-                break-inside: avoid;
-                page-break-inside: avoid;
-            }
-            .qr svg { width: 100%; height: auto; display: block; }
-            .code { font-family: monospace; font-size: 8pt; color: #333; margin-top: 1mm; }
-            .num  { font-size: 7pt; color: #999; }
-            .noprint { margin-bottom: 5mm; }
-            @media print { .noprint { display: none; } }
-        </style>
-        </head>
-        <body>
-            <div class="noprint">
-                <button onclick="window.print()">Imprimir</button>
-            </div>
-            <header>
-                <h1>{$title}</h1>
-                <div class="meta">{$spaceName} &middot; {$batch->quantity} etiquetas &middot; gerado em {$generated}</div>
-            </header>
-            <div class="sheet">{$cards}</div>
-        </body>
-        </html>
-        HTML;
-
-        return response($html, 200, ['Content-Type' => 'text/html; charset=utf-8']);
+        return response()->view('print.qr-batch', [
+            'title' => $title,
+            'spaceName' => $spaceName,
+            'batchQuantity' => $batch->quantity,
+            'generated' => $generated,
+            'cards' => $cards
+        ], 200, ['Content-Type' => 'text/html; charset=utf-8']);
     }
 }
