@@ -3,8 +3,7 @@
 namespace App\Http\Controllers\Concerns;
 
 use Illuminate\Http\Request;
-
-trait ResolvesAdventureEntity
+	trait ResolvesAdventureEntity
 {
     private function adventureEntity(Request $request, $unique_code)
     {
@@ -13,7 +12,7 @@ trait ResolvesAdventureEntity
 
         if (!$entity) {
             return response()->json(
-                ['error' => 'Registro n„o encontrado ou acesso negado.'],
+                ['error' => 'Registro n√£o encontrado ou acesso negado.'],
                 404
             );
         }
