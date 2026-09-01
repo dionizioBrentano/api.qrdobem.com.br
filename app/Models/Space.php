@@ -92,6 +92,11 @@ class Space extends Model
         return $this->hasOne(CauseProfile::class);
     }
 
+    public function causeProducts(): HasMany
+    {
+        return $this->hasMany(CauseProduct::class);
+    }
+
     /** Lotes de QR para impressão (T2-R03). */
     public function printBatches(): HasMany
     {
