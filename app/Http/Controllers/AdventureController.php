@@ -125,6 +125,28 @@ class AdventureController extends Controller
         ], 201);
     }
 
+    private function dispatchSilentPanic(Request $request, $entity, $challenge): void
+    {
+        $space = $entity->space_id ? Space::find($entity->space_id) : null;
+        
+        $panicController = app(PanicController::class);
+        $panicEvent = $panicController->createEvent(
+            $space,
+            [
+                'entity_id' => $entity->id,
+                'latitude' => $challenge->metadata['latitude'] ?? null,
+                'longitude' => $challenge->metadata['longitude'] ?? null,
+                'note' => 'Alerta Silencioso (Trilha Aventura)',
+            ],
+            PanicEvent::SOURCE_APP,
+            $request->tenant
+        );
+
+        if ($space) {
+            $panicController->notifyFamily($space, $panicEvent, $request->tenant?->name);
+        }
+    }
+
     public function silentTrigger(Request $request, $unique_code)
     {
         $entity = $this->adventureEntity($request, $unique_code);
@@ -161,25 +183,7 @@ class AdventureController extends Controller
             'status' => 'resolved'
         ]);
 
-        // Dispara pânico silencioso
-        $space = $entity->space_id ? Space::find($entity->space_id) : null;
-        
-        $panicController = app(PanicController::class);
-        $panicEvent = $panicController->createEvent(
-            $space,
-            [
-                'entity_id' => $entity->id,
-                'latitude' => $challenge->metadata['latitude'] ?? null,
-                'longitude' => $challenge->metadata['longitude'] ?? null,
-                'note' => 'Alerta Silencioso (Trilha Aventura)',
-            ],
-            PanicEvent::SOURCE_APP,
-            $request->tenant
-        );
-
-        if ($space) {
-            $panicController->notifyFamily($space, $panicEvent, $request->tenant?->name);
-        }
+        $this->dispatchSilentPanic($request, $entity, $challenge);
 
         return $genericResponse;
     }
